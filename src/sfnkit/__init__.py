@@ -15,23 +15,34 @@ from sfnkit.blocks import (
     subworkflow,
     wait,
 )
-from sfnkit.compute import ComputeBackend, ComputeSpec, Lambda, register_backend
+from sfnkit.compute import (
+    Batch,
+    BatchQueue,
+    ComputeBackend,
+    ComputeSpec,
+    FargateQueue,
+    Lambda,
+    register_backend,
+)
 from sfnkit.errors import CompileError, DeployError, LintError, SfnkitError, TraceError
 from sfnkit.iam import Allow, Deny, Policy
 from sfnkit.local import WorkflowFailed
 from sfnkit.step import Retry, Step, step
 from sfnkit.workflow import Workflow, workflow
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "Allow",
+    "Batch",
+    "BatchQueue",
     "CompileError",
     "ComputeBackend",
     "ComputeSpec",
     "Deny",
     "DeployError",
     "Err",
+    "FargateQueue",
     "Lambda",
     "LintError",
     "Ok",

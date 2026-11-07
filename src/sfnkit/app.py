@@ -34,6 +34,7 @@ class ImageVariant:
     system_packages: tuple[str, ...]
     python: str  # e.g. "3.14"
     architecture: str  # "x86_64" | "arm64"
+    runtime: str = "lambda"  # "lambda" | "container": what the image starts (ComputeBackend.image_runtime)
 
     @property
     def param_name(self) -> str:

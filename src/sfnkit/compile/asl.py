@@ -8,6 +8,7 @@ a JSONata expression plus what the content looks like (``Loc.kind``):
   carrier   ``{"$sw":1,"x":value,"f":{...}}`` built by the ASL (phis, Ok values, child results)
   mapout    ``{"$sw":1,"v":[...]}``, an inline Map's results
   dmapout   ``{"$sw":1,"dmap":...}``, a Distributed Map's ResultWriter manifest
+  arrout    ``{"$sw":1,"arr":{"b","p","n"}}``, an array job's results (one S3 file per item)
   outcome   ``{"ok":bool,"v":...,"error":str,"cause":{"$sw":1,"c":...}}`` from attempt
 
 Conditions run in JSONata and can't read S3, so every value a condition reads is a *fact*: the step
@@ -30,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sfnkit.compute.base import PAYLOAD, backend_for
+from sfnkit.compute.base import PAYLOAD, PAYLOAD_JSON, backend_for
 from sfnkit.errors import CompileError
 from sfnkit.expr import (
     And,
@@ -250,6 +251,7 @@ class Compiler:
         self.input_regs: dict[tuple, FactReg] = {}  # (workflow, param) -> facts in child mode
         self.names: set[str] = set()
         self.pids = 0
+        self.express = False  # compiling states that run in an EXPRESS execution
 
     # registries
     def treg(self, n: TaskN) -> FactReg:
@@ -430,6 +432,9 @@ class Compiler:
             if loc.kind == "mapout" and not e.path and op in ("$len", "$bool"):
                 n = f"$count({loc.expr}.v)"
                 return n if op == "$len" else f"({n} > 0)"
+            if loc.kind == "arrout" and not e.path and op in ("$len", "$bool"):
+                n = f"{loc.expr}.arr.n"
+                return n if op == "$len" else f"({n} > 0)"
             if loc.kind == "raw":
                 x = loc.expr + jpath(e.path)
                 return {
@@ -469,6 +474,8 @@ class Compiler:
             raise CompileError("a condition on a map's results can only use length(...); add a step to inspect them")
         if loc.kind == "dmapout":
             raise CompileError("Distributed Map results can't be read by a condition; pass them to a step")
+        if loc.kind == "arrout":
+            raise CompileError("a condition on an array job's results can only use length(...); pass them to a step")
         raise CompileError(f"internal: no facts for {loc.kind}")
 
     def val(self, e: Expr, ctx: Ctx) -> str:
@@ -571,6 +578,7 @@ class Compiler:
         parent; each parameter arrives as a carrier so conditions in the child can read facts."""
         self.analyse(graph.root)
         self.machine = m
+        self.express = m.type == "EXPRESS"
         ctx = Ctx("")
         defaults = jlit(graph.input.defaults)
         init_assign: dict[str, Any] = {"input": J(f"$merge([{defaults}, $states.input])")}
@@ -660,11 +668,24 @@ class Compiler:
 
         return J(render)
 
+    def check_express(self, st: TaskN, fn) -> None:
+        if self.express and backend_for(fn.compute).standard_only:
+            raise CompileError(
+                f"step {st.step.name} runs on {fn.compute.kind}, which Step Functions can only wait for in "
+                "STANDARD workflows; it can't run in an EXPRESS workflow or an EXPRESS Distributed Map child"
+            )
+
     def task_state(self, st: TaskN, ctx: Ctx) -> tuple[dict, str]:
         fn = self.function_for(st)
+        self.check_express(st, fn)
         backend = backend_for(fn.compute)
         ts = backend.task_state(fn)
-        payload = self.envelope(st, ctx)
+        state = self.task_from(ts, st, fn, self.envelope(st, ctx))
+        return state, ts.result
+
+    def task_from(self, ts, st: TaskN, fn, payload: J) -> dict:
+        """A Task state from a backend's ``TaskState``, with the envelope filled in."""
+        backend = backend_for(fn.compute)
         args = _replace(ts.arguments, payload)
         state: dict[str, Any] = {"Type": "Task", "Resource": ts.resource, "Arguments": args}
         if ts.timeout_seconds:
@@ -675,7 +696,7 @@ class Compiler:
         self.machine.substitutions.update(ts.substitutions)
         if fn not in self.machine.functions:
             self.machine.functions.append(fn)
-        return state, ts.result
+        return state
 
     def task(self, st: TaskN, ctx: Ctx) -> Frag:
         state, result = self.task_state(st, ctx)
@@ -729,7 +750,36 @@ class Compiler:
             "or another inline map's results"
         )
 
+    def array_target(self, m: MapN):
+        """(task, function, item parameter) when ``m`` is ``step.map(...)`` on a step whose backend runs
+        native array jobs; None otherwise."""
+        if m.distributed or len(m.body.stmts) != 1 or not isinstance(m.body.stmts[0], TaskN):
+            return None
+        t = m.body.stmts[0]
+        r = m.body.result
+        if not (isinstance(r, Get) and r.src is t and not r.path):
+            return None
+        fn = self.function_for(t)
+        if not backend_for(fn.compute).supports_array:
+            return None
+        params = [k for k, e in t.args.items() if isinstance(e, Get) and e.src is m.item and not e.path]
+        others = [e for k, e in t.args.items() if k not in params]
+        if len(params) != 1 or any(g.src is m.item for e in others for g in _gets(e)):
+            return None
+        return t, fn, params[0]
+
     def map(self, m: MapN, ctx: Ctx) -> Frag:
+        target = self.array_target(m)
+        if target is not None:
+            return self.array_map(m, ctx, *target)
+        tolerant = any(
+            m.opts.get(k) is not None for k in ("tolerated_failure_count", "tolerated_failure_percentage")
+        )
+        if tolerant and not m.distributed:
+            raise CompileError(
+                "tolerated_failure_count/_percentage need distributed=True, or a step whose backend runs "
+                "array jobs (Batch): an inline Map state can't tolerate failures"
+            )
         fields, item_loc = self.items_source(m, ctx)
         prefix = f"{ctx.prefix}{m.id}_"
         bctx = Ctx(prefix)
@@ -747,7 +797,11 @@ class Compiler:
             bctx.syms[id(v)] = ctx.loc(v).at(f"${var}")
         bctx.syms[id(m.item)] = item_loc.at(f"${bctx.var('item')}")
         init = Frag.single(self.state_name("Item", m.id), {"Type": "Pass", "Assign": assign})
+        was_express = self.express
+        if m.distributed and (m.opts.get("child_type") or "STANDARD") == "EXPRESS":
+            self.express = True
         body = self.scope(m.body, bctx)
+        self.express = was_express
         ereg = self.elem_regs.setdefault(id(m), FactReg())
         extra = {"i": f"${bctx.var('index')}"} if m.distributed else None
         out = J(lambda: self.carrier(m.body.result, bctx, ereg, extra))
@@ -779,6 +833,126 @@ class Compiler:
             state["MaxConcurrency"] = m.opts["max_concurrency"]
         state["Output"] = J("{}")
         return Frag.single(self.state_name("Map", m.id), state)
+
+    def array_map(self, m: MapN, ctx: Ctx, t: TaskN, fn, param: str) -> Frag:
+        """``step.map(items)`` as one array job: write the items to S3 if they aren't there yet, skip an
+        empty list, then submit ``ceil(n / items_per_job)`` children (at least 2: Batch's minimum)."""
+        from sfnkit.blocks import S3File, S3Objects
+
+        self.check_express(t, fn)
+        backend = backend_for(fn.compute)
+        per = int(getattr(fn.compute, "items_per_job", 1))
+        var = ctx.var(m.id)
+        self.machine.substitutions["ArtifactsBucket"] = {"Ref": "ArtifactsBucket"}
+        frags: list[Frag] = []
+
+        src = m.items
+        loc = ctx.loc(src.src) if isinstance(src, Get) else None
+        if loc is not None and loc.kind == "wrapper":
+            key, _ = self.ireg(loc.node).facet(src.path, "s3")  # the producer writes the JSON array file
+            locator = f"{loc.expr}.it.{key}"
+        elif loc is not None and loc.kind == "arrout" and not src.path:
+            locator = f"{loc.expr}.arr"  # read item i straight from the previous array's result i
+        else:
+            if isinstance(src, (S3Objects, S3File)):
+                raise CompileError(
+                    "array jobs map over a list; read S3 objects with each(..., distributed=True)"
+                )
+            fields, _ = self.items_source(m, ctx)
+            items = fields["Items"]
+            items_var = ctx.var(m.id + "_items")
+            key = f"'runs/' & $states.context.Execution.Name & '/{m.id}/items.json'"
+            put = {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+                "Arguments": {
+                    "Bucket": "${ArtifactsBucket}",
+                    "Key": J(key),
+                    "Body": items,  # the list itself: Step Functions writes a JSON value as JSON text
+                    "ContentType": "application/json",
+                },
+                "Assign": {
+                    items_var: J(
+                        lambda i=items: (
+                            f'{{"bucket": \'${{ArtifactsBucket}}\', "key": {key}, "n": $count({i.fn()})}}'
+                        )
+                    )
+                },
+                "Output": J("{}"),
+            }
+            frags.append(Frag.single(self.state_name("PutItems", m.id), put))
+            locator = f"${items_var}"
+
+        n = f"{locator}.n"
+        array_fields = {"param": jlit(param), "items": locator, "per": str(per)}
+        limits = []
+        if m.opts.get("tolerated_failure_count") is not None:
+            limits.append(str(int(m.opts["tolerated_failure_count"])))
+        if m.opts.get("tolerated_failure_percentage") is not None:
+            limits.append(f"$floor({n} * {float(m.opts['tolerated_failure_percentage'])} / 100)")
+        if limits:  # either limit being passed fails the step, as in a Distributed Map
+            array_fields["tolerate"] = limits[0] if len(limits) == 1 else f"$min([{', '.join(limits)}])"
+        tolerant = ', "t": true' if limits else ""
+        result = J(
+            f'{{"$sw": 1, "arr": {{"b": \'${{ArtifactsBucket}}\', '
+            f"\"p\": 'runs/' & $states.context.Execution.Name & '/{m.id}/results/', \"n\": {n}{tolerant}}}}}"
+        )
+        empty_name = self.state_name("Empty", m.id)
+        empty = {"Type": "Pass", "Assign": {var: result}, "Output": J("{}")}
+        big_name = self.state_name("TooBig", m.id)
+        limit = 10_000 * per
+        big = {
+            "Type": "Fail",
+            "Error": "sfnkit.ArrayTooLarge",
+            "Cause": J(
+                f"'{t.step.name}.map() got ' & $string({n}) & ' items; one array job takes at most "
+                f"{limit} (10,000 children x items_per_job={per})'"
+            ),
+        }
+
+        args = {k: self.val(e, ctx) for k, e in t.args.items() if k != param}
+
+        def render():
+            return jobj(
+                {
+                    "sw": "1",
+                    "step": jlit(t.step.key),
+                    "execution": "$states.context.Execution.Name",
+                    "node": jlit(m.id),
+                    "args": jobj(args),
+                    "array": jobj(array_fields),
+                }
+            )
+
+        ts = backend.array_task_state(fn, f"$max([2, $ceil({n} / {per})])")
+        submit = self.task_from(ts, t, fn, J(render))
+        submit["Assign"] = {var: result}
+        submit["Output"] = J("{}")
+        submit_name = self.state_name(t.step.name, m.id)
+        check_name = self.state_name("Check", m.id)
+        check = {
+            "Type": "Choice",
+            "Choices": [
+                {"Condition": J(f"{n} = 0"), "Next": empty_name},
+                {"Condition": J(f"{n} > {limit}"), "Next": big_name},
+            ],
+            "Default": submit_name,
+        }
+        states = {check_name: check, empty_name: empty, big_name: big, submit_name: submit}
+        frags.append(
+            Frag(
+                states,
+                check_name,
+                [
+                    lambda nxt, s=empty: s.__setitem__("Next", nxt),
+                    lambda nxt, s=submit: s.__setitem__("Next", nxt),
+                ],
+            )
+        )
+        ctx.syms[id(m)] = Loc(f"${var}", "arrout", node=m)
+        out = seq(frags)
+        assert out is not None
+        return out
 
     def start_child(self, child_name: str, input_j: J) -> dict:
         ph = f"Sm{_camel(child_name)}Arn"
@@ -963,6 +1137,8 @@ def _gets(e: Expr) -> list[Get]:
 def _replace(obj, payload):
     if obj is PAYLOAD:
         return payload
+    if obj is PAYLOAD_JSON:
+        return J(lambda: f"$string({payload.fn()})")
     if isinstance(obj, dict):
         return {k: _replace(v, payload) for k, v in obj.items()}
     if isinstance(obj, list):

@@ -46,9 +46,19 @@ def render_dockerfile(image: ImageVariant, uv_version: str = UV_VERSION) -> str:
     lines += [
         "COPY sfnkit/ ${LAMBDA_TASK_ROOT}/sfnkit/",
         "COPY project/ ${LAMBDA_TASK_ROOT}/",
-        f'CMD ["{HANDLER}"]',
-        "",
     ]
+    if image.runtime == "container":
+        # Batch/ECS run the same base image, but without Lambda's bootstrap entrypoint.
+        lines += [
+            "ENV PYTHONPATH=${LAMBDA_TASK_ROOT}",
+            'ENTRYPOINT ["/var/lang/bin/python3", "-m", "sfnkit.runtime.container"]',
+            "CMD []",
+        ]
+    elif image.runtime == "lambda":
+        lines.append(f'CMD ["{HANDLER}"]')
+    else:
+        raise ValueError(f"unknown image runtime {image.runtime!r}")
+    lines.append("")
     return "\n".join(lines)
 
 

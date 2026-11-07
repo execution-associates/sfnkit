@@ -151,7 +151,7 @@ body into child workflows keeps the count down.
 |---|---|
 | independent step calls | Parallel |
 | `if/elif/else`, `match` with literal, value and OR patterns and guards | Choice |
-| `step.map(items, **kw)`, `with each(items) as it:` | Map (inline), or Distributed with `distributed=True` |
+| `step.map(items, **kw)`, `with each(items) as it:` | Map (inline), or Distributed with `distributed=True`. On a Batch step, `step.map` is one array job |
 | `match attempt(fn, ...)` with `case Ok(v)` / `case Err(name, cause)` | Catch |
 | `with subworkflow("name"):`, calling another `@workflow` | child state machine (`startExecution.sync:2`) |
 | `wait(seconds=...)`, `wait(until=...)` | Wait. A barrier: everything before it runs first |
@@ -241,6 +241,58 @@ The build stops with an error if the ignore rules would drop the workflow's own 
 create IAM roles. Credentials from `sts get-session-token` can't call IAM without MFA, so use
 long-term or assumed-role credentials.
 
+## Running steps on AWS Batch
+
+Give a step `compute=Batch(...)` to run it as an AWS Batch job instead of a Lambda function. That's for
+work that needs more than Lambda's 15 minutes or 10 GB, or a lot of parallelism.
+
+```python
+from sfnkit import Batch, BatchQueue, FargateQueue, step, workflow
+
+spot = FargateQueue(subnets=["subnet-0abc..."], security_groups=["sg-0abc..."], spot=True, max_vcpus=256)
+gpu = BatchQueue("arn:aws:batch:us-west-2:123456789012:job-queue/gpu", platform="EC2")  # made elsewhere
+
+@step(compute=Batch(queue=spot, vcpus=4, memory=16384, timeout=4 * 3600))
+def align(sample: dict, reference: str) -> str:
+    ...  # returns the s3:// URI of the aligned file
+
+@step(compute=Batch(queue=gpu, vcpus=8, memory=61440, gpus=1))
+def call_variants(bam: str) -> str: ...
+
+@workflow
+def cohort(samples: list):
+    bams = align.map(samples, reference="s3://refs/GRCh38.fa")  # one array job, a child per sample
+    return call_variants.map(bams)  # a second array job over the first one's results
+```
+
+- **Queues.** `FargateQueue` creates a Fargate or Fargate Spot compute environment and job queue in
+  the stack, and steps with equal queues share it. `BatchQueue(arn, platform=...)` uses a queue made
+  elsewhere, such as CDK or Terraform. That's the way to get EC2 instances, GPUs or custom launch
+  templates.
+- **`step.map(items)` on a Batch step is one array job**, not a Map state: one submit, up to 10,000
+  children. Each child reads its item from S3 and writes its result back.
+  - `Batch(items_per_job=k)` gives each child k items, for lists over 10,000 or very small items.
+  - An empty list skips the job.
+  - Items can come from a step's output, another array job's results, a workflow input or a literal
+    list.
+  - `length(results)` works in conditions. Anything else about the results needs a step.
+- **Results and errors work as with Lambda.** The job reports back through its task token, so
+  `attempt`, `Retry(on=[...])` and `Err(...)` see the exception's class name. A failing array child
+  fails the step with its error and terminates the rest of the array.
+- **Two retry layers.** Batch retries infrastructure failures (image pull errors, Spot reclaims,
+  lost hosts) up to `retries` attempts. Your own exceptions, running out of memory and the attempt
+  timeout are never retried by Batch. Exceptions go to Step Functions instead.
+- **`timeout` bounds each attempt's run time.** Time spent waiting in the queue isn't limited.
+- **STANDARD workflows only.** Step Functions can't wait for Batch jobs in an EXPRESS workflow or an
+  EXPRESS Distributed Map child, and the compiler rejects that.
+- **Per-sample pipelines.** Inside `with each(samples, distributed=True) as it:`, Batch steps run as
+  one job each, so every sample moves on without waiting for the slowest one.
+- **Images.** Batch steps are built like Lambda steps, on the Lambda Python base image with the same
+  `deps` and `system_packages`, but start `python -m sfnkit.runtime.container`. Tools that need
+  another base image (BioContainers, CUDA) aren't supported yet.
+
+`examples/batch.py` exercises all of this, and `tests/test_e2e_batch.py` runs it on Fargate Spot.
+
 ## Adding a compute backend
 
 Every step runs through one interface, `sfnkit.compute.base.ComputeBackend`. To add one:
@@ -251,12 +303,17 @@ Every step runs through one interface, `sfnkit.compute.base.ComputeBackend`. To 
    - `baseline_statements(fn, ctx)`: IAM its own role needs.
    - `task_state(fn)`: the Task state. Put `PAYLOAD` where the envelope goes.
    - `state_machine_statements(fn)`: IAM the state machine needs to start it.
-3. Register it with `register_backend` or the `sfnkit.compute` entry point.
+3. Set the optional class attributes that apply:
+   - `image_runtime = "container"` builds the image with `python -m sfnkit.runtime.container` as its
+     entrypoint. That runtime reads the envelope and task token from the environment and reports
+     with `SendTaskSuccess`/`SendTaskFailure`. Put `PAYLOAD_JSON` where the envelope goes as a string.
+   - `standard_only = True` when Step Functions can only wait for the service in STANDARD workflows.
+   - `supports_array = True` plus `array_task_state(fn, size)` makes `step.map` one native array job.
+4. Register it with `register_backend` or the `sfnkit.compute` entry point.
 
-The compiler, CloudFormation assembly and deployer only call this interface. Containers can run the
-same image with the entrypoint `python -m sfnkit.runtime.container`, which reads the envelope and
-task token from the environment and reports the result with `SendTaskSuccess`/`SendTaskFailure`.
-`tests/core/test_compile.py` registers a fake ECS backend to prove nothing else needs to change.
+The compiler, CloudFormation assembly and deployer only call this interface. `sfnkit.compute.batch`
+is a complete example. `tests/core/test_compile.py` registers a fake ECS backend to prove nothing else
+needs to change.
 
 ## Development
 
