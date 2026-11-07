@@ -1,6 +1,6 @@
 [project]
 name = "sfnkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Author AWS Step Functions workflows as decorated Python functions"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Distributed Computing",
 ]
-dependencies = ["boto3>=1.35"]
+dependencies = ["boto3>=1.35", "pathspec>=0.12"]
 
 [project.urls]
 Homepage = "https://github.com/execution-associates/sfnkit"

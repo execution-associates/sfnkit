@@ -11,51 +11,122 @@ pip install sfnkit
 Requires Python 3.12+. Deploying also needs Docker (to build the Lambda images) and AWS credentials
 that can create IAM roles.
 
+Here is a complete workflow, `examples/checkout.py`. It loads an order from S3, prices each line,
+scores the order's risk, and charges the card:
+
 ```python
-from sfnkit import step, workflow, attempt, Ok, Err, each, subworkflow, wait, fail, is_null
-from sfnkit import Lambda, Retry, Allow, Policy
+# examples/checkout.py
+import json
 
-base = Policy(Allow("s3:GetObject", "arn:aws:s3:::data/*"))
+import boto3
 
-@step(compute=Lambda(memory=1024, timeout=120), deps=["httpx>=0.27"])
-def fetch(url: str) -> list[str]: ...
+from sfnkit import Allow, Err, Lambda, Ok, Policy, Retry, attempt, fail, step, subworkflow, wait, workflow
 
-@step(deps=["pyyaml"], retry=Retry(on=[ValueError], max_attempts=3))
-def parse(doc: str) -> dict: ...
+BUCKET = "acme-orders"  # point this at your own bucket
+
+# The workflow's base IAM set. A step without its own iam= gets exactly this.
+base = Policy(Allow("s3:GetObject", f"arn:aws:s3:::{BUCKET}/orders/*"))
+
+
+class PaymentDeclined(Exception):
+    pass
+
+
+@step
+def load_order(key: str) -> dict:
+    body = boto3.client("s3").get_object(Bucket=BUCKET, Key=key)["Body"]
+    return json.load(body)  # {"id": "o-17", "card": "4242...", "items": [{"sku": "mug", "qty": 2}]}
+
+
+@step(
+    deps=["pyyaml>=6"],  # added to this step's image only
+    iam=Policy(Allow("s3:GetObject", f"arn:aws:s3:::{BUCKET}/prices.yaml")),  # this, and none of base
+)
+def load_prices() -> dict:
+    import yaml
+
+    body = boto3.client("s3").get_object(Bucket=BUCKET, Key="prices.yaml")["Body"]
+    return yaml.safe_load(body)  # {"mug": 12.5, "lamp": 300}
+
+
+@step
+def price_item(item: dict, prices: dict) -> float:
+    return prices[item["sku"]] * item["qty"]
+
+
+@step
+def order_total(line_totals: list[float]) -> float:
+    return round(sum(line_totals), 2)
+
+
+@step
+def score_risk(total: float) -> str:
+    return "low" if total < 100 else "medium" if total < 1000 else "high"  # stand-in for a fraud model
+
+
+@step(compute=Lambda(timeout=120), retry=Retry(on=[TimeoutError], max_attempts=3))
+def charge(card: str, amount: float) -> str:
+    if card.startswith("4000"):  # stand-in for a payment provider
+        raise PaymentDeclined(f"card ending {card[-4:]} declined")
+    return f"rcpt-{card[-4:]}-{amount}"
+
+
+@step(iam=base + Allow("s3:PutObject", f"arn:aws:s3:::{BUCKET}/declined/*"))  # base, plus this
+def record_decline(order: dict, cause: dict) -> None:
+    body = json.dumps({"order": order["id"], "error": cause["errorMessage"]})
+    boto3.client("s3").put_object(Bucket=BUCKET, Key=f"declined/{order['id']}.json", Body=body)
+
 
 @workflow(iam=base)
-def pipeline(url: str, label: str = "run"):
-    docs = fetch(url)
-    rows = parse.map(docs, max_concurrency=10)          # Map state
+def checkout(key: str):
+    order = load_order(key)  # these two don't depend on each other,
+    prices = load_prices()  # so they run side by side in a Parallel state
+    line_totals = price_item.map(order["items"], prices=prices, max_concurrency=10)  # Map state
 
-    with subworkflow("scoring"):                         # child state machine
-        score = score_rows(rows)
+    with subworkflow("risk"):  # a child state machine
+        total = order_total(line_totals)  # sum() on a step's output has to happen in a step
+        risk = score_risk(total)
 
-    match score["tier"]:                                 # Choice state
-        case "gold" | "silver":
-            order = publish(rows)
-        case "review" if score["value"] > 0.5:
-            wait(seconds=300)
-            order = queue_for_review(rows)
+    match risk:  # Choice state
+        case "low":
+            pass
+        case "medium" if total < 500:
+            wait(seconds=300)  # Wait state: hold the order for 5 minutes
         case _:
-            fail("LowScore", "score below 0.5")
+            fail("HighRisk", "order needs manual review")  # Fail state
 
-    match attempt(charge, order):                        # Catch
+    match attempt(charge, order["card"], total):  # Catch
         case Ok(receipt):
             pass
-        case Err("PaymentDeclined", cause):
-            receipt = refund(order, cause)
+        case Err("PaymentDeclined", cause):  # any other error fails the workflow
+            record_decline(order, cause)
+            receipt = None
 
-    return {"receipt": receipt}
+    return {"order": order["id"], "total": total, "receipt": receipt}
 ```
 
+**Every function the workflow calls is a `@step`.** Each step deploys as its own Lambda function with
+its own IAM role, and runs as its own Task state. Steps with the same dependencies share an image.
+
+**The workflow body only wires steps together.** It is traced when you synth or deploy and never runs
+in AWS. So anything that computes on a step's output, like the `sum()` in `order_total`, has to happen
+inside a step. A plain function (no `@step`) called from the body just runs during tracing: it can pass
+values along, but it can't compute on them.
+
+**Outside a workflow, a step is a plain function**, so steps unit-test like any Python:
+`price_item({"sku": "mug", "qty": 2}, {"mug": 12.5})` returns `25.0`. `checkout.local(key)` runs the
+whole workflow in-process, calling the real step code. `tests/test_readme_example.py` does that for
+every path against a mocked S3.
+
 ```
-sfnkit local  myapp.flows:pipeline --input '{"url": "https://..."}'
-sfnkit synth  myapp.flows:pipeline -o out/
-sfnkit deploy myapp.flows:pipeline --region us-west-2
-sfnkit run    myapp.flows:pipeline --input '{"url": "https://..."}'
-sfnkit destroy myapp.flows:pipeline
+sfnkit local   examples.checkout:checkout --input '{"key": "orders/o-17.json"}'
+sfnkit synth   examples.checkout:checkout -o out/
+sfnkit deploy  examples.checkout:checkout --region us-west-2
+sfnkit run     examples.checkout:checkout --input '{"key": "orders/o-17.json"}'
+sfnkit destroy examples.checkout:checkout
 ```
+
+`local` runs in-process but its steps still call AWS, so it needs the bucket to exist.
 
 ## How a workflow body becomes a state machine
 
@@ -147,6 +218,17 @@ A step's image is built from the workflow's `deps` + the step's `deps` (+ `syste
 installed with `microdnf`), on `public.ecr.aws/lambda/python:<python>`. Steps with the same set
 share an image. Tags are content hashes, so an unchanged image isn't rebuilt or pushed again. Build
 contexts go in `<project>/.sfnkit/build/`.
+
+**The image gets the folders your workflow and steps import from, minus anything git ignores.**
+
+- **Inside a git repository, git decides.** Nested `.gitignore` files, `.git/info/exclude` and your
+  global excludes file all count. As in git, a tracked file is included even if a pattern matches it.
+- **Outside a repository, sfnkit reads the `.gitignore` files itself.**
+- **`.env` and `.env.*` files, and caches such as `.venv` and `__pycache__`, are always left out**,
+  even when nothing ignores them or git tracks them. `@workflow(exclude=[...])` takes more globs.
+
+Everything else ships, so keep other secrets, like a key file, out of those folders or ignore them.
+The build stops with an error if the ignore rules would drop the workflow's own code.
 
 ## Deploying
 

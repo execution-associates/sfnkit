@@ -22,7 +22,7 @@ from sfnkit.local import WorkflowFailed
 from sfnkit.step import Retry, Step, step
 from sfnkit.workflow import Workflow, workflow
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Allow",
