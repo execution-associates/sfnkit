@@ -9,10 +9,18 @@ A backend turns one ``FunctionSpec`` (a step with its resolved compute, IAM poli
 Nothing in the compiler, CloudFormation assembly or deployer imports a concrete backend; they only call
 ``backend_for(spec)``. Third-party backends register through the ``sfnkit.compute`` entry point.
 
+Optional capabilities, as class attributes:
+  * ``image_runtime``: ``"lambda"`` builds the image with the Lambda handler as its command;
+    ``"container"`` makes ``python -m sfnkit.runtime.container`` the entrypoint.
+  * ``standard_only``: Step Functions can only wait for this service in STANDARD workflows, so the
+    compiler rejects the step inside an EXPRESS workflow or an EXPRESS Distributed Map child.
+  * ``supports_array`` + ``array_task_state``: ``step.map(items)`` becomes one native array job
+    instead of a Map state (see ``sfnkit.compute.batch``).
+
 Runtime side: every backend must deliver the envelope from ``sfnkit.runtime.protocol`` to
 ``sfnkit.runtime.execute.execute`` and hand its returned wrapper back to Step Functions. Lambda does
-this with the event and return value; a container backend would use a task token (envelope via env/S3,
-result via SendTaskSuccess).
+this with the event and return value. Container backends pass the envelope and the task token in the
+environment, and ``sfnkit.runtime.container`` reports with SendTaskSuccess/SendTaskFailure.
 """
 
 from __future__ import annotations
@@ -32,8 +40,10 @@ class ComputeSpec:
     kind: ClassVar[str] = "abstract"
 
 
-# Placeholder the backend puts where the envelope goes in its Task ``Arguments``.
+# Placeholders the backend puts where the envelope goes in its Task ``Arguments``: PAYLOAD as a JSON
+# object, PAYLOAD_JSON as a string holding that JSON (for an environment variable).
 PAYLOAD = object()
+PAYLOAD_JSON = object()
 
 
 @dataclass
@@ -77,6 +87,15 @@ class ComputeBackend(ABC):
 
     def default_retry(self) -> list[dict]:
         return []
+
+    image_runtime: ClassVar[str] = "lambda"
+    standard_only: ClassVar[bool] = False
+    supports_array: ClassVar[bool] = False
+
+    def array_task_state(self, fn: FunctionSpec, size: str) -> TaskState:
+        """The Task that runs ``size`` copies of the step as one array job (``size`` is JSONata).
+        Only called when ``supports_array`` is true."""
+        raise NotImplementedError
 
 
 _BACKENDS: dict[type, ComputeBackend] = {}

@@ -9,11 +9,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import time
 import traceback
 from typing import Any
 
-from sfnkit.errors import SfnkitError
+from sfnkit.errors import SfnkitError, ToleratedFailureExceeded
 from sfnkit.expr import (
     And,
     Cmp,
@@ -54,6 +55,17 @@ def run_local(workflow, inputs: dict[str, Any], *, real_waits: bool = False, s3=
     runner = _Runner(real_waits, s3)
     env: dict[int, Any] = {id(g.input): args}
     return _rt(runner.scope(g.root, env))
+
+
+def tolerated(opts: dict, n: int) -> int | None:
+    """How many of ``n`` items may fail (None: none, the first failure fails the map). Either limit
+    being passed fails the map, as in a Distributed Map."""
+    limits = []
+    if opts.get("tolerated_failure_count") is not None:
+        limits.append(int(opts["tolerated_failure_count"]))
+    if opts.get("tolerated_failure_percentage") is not None:
+        limits.append(math.floor(n * float(opts["tolerated_failure_percentage"]) / 100))
+    return min(limits) if limits else None
 
 
 def index(v: Any, path: tuple) -> Any:
@@ -113,17 +125,25 @@ class _Runner:
         items = self.items(st, env)
         if not isinstance(items, list):
             raise TypeError(f"each(...) items must be a list, got {type(items).__name__}")
-        tolerated = st.opts.get("tolerated_failure_percentage") or st.opts.get("tolerated_failure_count")
+        allowed = tolerated(st.opts, len(items))
         out = []
+        failed: list[BaseException] = []
         for item in items:
             e2 = dict(env)
             e2[id(st.item)] = _rt(item)
             try:
                 out.append(self.scope(st.body, e2))
-            except Exception:
-                if not tolerated:
+            except Exception as e:
+                if allowed is None:
                     raise
+                failed.append(e)
                 out.append(None)
+        if allowed is not None and len(failed) > allowed:
+            first = failed[0]
+            msg = f"more than {allowed} of {len(items)} items failed; first: {type(first).__name__}: {first}"
+            if st.distributed:
+                raise WorkflowFailed("States.ExceedToleratedFailureThreshold", msg)
+            raise ToleratedFailureExceeded(msg) from first
         return out
 
     def items(self, st: MapN, env: dict):

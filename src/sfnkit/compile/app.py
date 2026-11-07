@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sfnkit.app import App, AppSettings, FunctionSpec, ImageVariant, SmNeed, StateMachineSpec
 from sfnkit.compile.asl import Compiler, Machine, render_fixpoint
+from sfnkit.compute.base import backend_for
 from sfnkit.compute.lambda_ import Lambda
 from sfnkit.errors import CompileError
 from sfnkit.ir import Graph, SubN, TaskN
@@ -77,8 +78,11 @@ class _Builder:
             self.sub_names[id(s)] = self.unique(_sm_name(s.name))
         return self.sub_names[id(s)]
 
-    def image_for(self, deps: list[str], system: list[str]) -> ImageVariant:
-        key = _h(deps, system, self.settings.python, self.settings.architecture)[:12]
+    def image_for(self, deps: list[str], system: list[str], runtime: str = "lambda") -> ImageVariant:
+        parts: list = [deps, system, self.settings.python, self.settings.architecture]
+        if runtime != "lambda":  # Lambda keys stay as they were before runtimes existed
+            parts.append(runtime)
+        key = _h(*parts)[:12]
         if key not in self.images:
             self.images[key] = ImageVariant(
                 key=key,
@@ -86,6 +90,7 @@ class _Builder:
                 system_packages=tuple(system),
                 python=self.settings.python,
                 architecture=self.settings.architecture,
+                runtime=runtime,
             )
         return self.images[key]
 
@@ -97,7 +102,7 @@ class _Builder:
         system = sorted(
             set(self.root.system_packages) | set(getattr(owner, "system_packages", ())) | set(step.system_packages)
         )
-        image = self.image_for(deps, system)
+        image = self.image_for(deps, system, backend_for(compute).image_runtime)
         key = (step.key, t.policy.digest(), repr(compute), image.key)
         fn = self.functions.get(key)
         if fn is None:

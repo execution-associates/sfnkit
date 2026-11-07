@@ -104,6 +104,9 @@ def resolve(value: Any, s3=None) -> Any:
         return _decode_cause(value[P.CAUSE])
     if P.DMAP in value:
         return _read_dmap(value[P.DMAP], s3)
+    if P.ARRAY in value:
+        loc = value[P.ARRAY]
+        return [resolve(v, s3) for v in array_items(loc, 0, int(loc["n"]), s3)]
     raise ValueError(f"unknown sfnkit wrapper: {sorted(value)}")
 
 
@@ -149,6 +152,59 @@ def _read_dmap(details: dict, s3=None) -> list:
     for i, v in by_index.items():
         out[i] = v
     return out + unindexed
+
+
+def array_items(locator: dict, start: int, stop: int, s3=None) -> list:
+    """Items ``[start, stop)`` of an array locator, still wrapped: a JSON array file
+    (``{"bucket", "key", "n"}``) or an array job's per-item result files (``{"b", "p", "n"}``)."""
+    if stop <= start:
+        return []
+    if "key" in locator:
+        data = _get_json(locator["bucket"], locator["key"], s3=s3)
+        if isinstance(data, str):  # a list written as a JSON string (e.g. by Step Functions' S3 PutObject)
+            data = json.loads(data)
+        return data[start:stop]
+    bucket, prefix = locator["b"], locator["p"]
+    tolerant = bool(locator.get("t"))
+    client = _s3(s3)  # one client shared across threads (boto3 clients are thread-safe)
+
+    def get(key: str):
+        if tolerant:  # a tolerated failure left no result: it reads as None, as in a Distributed Map
+            got = get_json_if_exists(bucket, key, client)
+            return None if got is _MISSING else got
+        return _get_json(bucket, key, s3=client)
+
+    keys = [f"{prefix}{i}.json" for i in range(start, stop)]
+    if len(keys) == 1:
+        return [get(keys[0])]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(32, len(keys))) as pool:
+        return list(pool.map(get, keys))
+
+
+def _not_found(e: Exception) -> bool:
+    code = getattr(e, "response", {}).get("Error", {}).get("Code")
+    return code in ("404", "NoSuchKey", "NotFound")
+
+
+def get_json_if_exists(bucket: str, key: str, s3=None) -> Any:
+    try:
+        return _get_json(bucket, key, s3=s3)
+    except Exception as e:
+        if _not_found(e):
+            return _MISSING
+        raise
+
+
+def exists(bucket: str, key: str, s3=None) -> bool:
+    try:
+        _s3(s3).head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception as e:
+        if _not_found(e):
+            return False
+        raise
 
 
 def _input_index(child: dict) -> int | None:
@@ -250,7 +306,7 @@ def wrap(
                 elements.append(w)
             if spec.get("mode", "inline") == "s3":
                 b, k = off.put(elements)
-                facets[key] = {"bucket": b, "key": k}
+                facets[key] = {"bucket": b, "key": k, "n": len(elements)}
             else:
                 facets[key] = elements
         out[P.ITEMS] = facets
