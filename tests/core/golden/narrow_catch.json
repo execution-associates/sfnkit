@@ -1,0 +1,86 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Attempt_a1": {
+    "Arguments": {
+     "FunctionName": "${FnCharge1439edArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.charge\", \"execution\": $states.context.Execution.Name, \"node\": \"n2\", \"args\": {\"order\": {\"order\": \"o\", \"n\": $input.n}}} %}"
+    },
+    "Assign": {
+     "a1": "{% {\"ok\": true, \"v\": $states.result.Payload, \"error\": null, \"cause\": null} %}"
+    },
+    "Catch": [
+     {
+      "Assign": {
+       "a1": "{% {\"ok\": false, \"v\": null, \"error\": $states.errorOutput.Error, \"cause\": {\"$sw\": 1, \"c\": $states.errorOutput.Cause}} %}"
+      },
+      "ErrorEquals": [
+       "PaymentDeclined"
+      ],
+      "Next": "Choice_c3",
+      "Output": "{% {} %}"
+     }
+    ],
+    "Next": "Choice_c3",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "Choice_c3": {
+    "Choices": [
+     {
+      "Condition": "{% ($a1.ok = true) %}",
+      "Next": "Join_c3b0"
+     }
+    ],
+    "Default": "Join_c3b1",
+    "Type": "Choice"
+   },
+   "Done_main": {
+    "End": true,
+    "Output": "{% $phi4 %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "Attempt_a1",
+    "Type": "Pass"
+   },
+   "Join_c3b0": {
+    "Assign": {
+     "phi4": "{% $a1.v %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c3b1": {
+    "Assign": {
+     "phi4": "{% {\"declined\": true} %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   }
+  }
+ }
+}

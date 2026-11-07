@@ -1,0 +1,135 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Attempt_a1": {
+    "Assign": {
+     "a1": "{% {\"ok\": true, \"v\": $states.result[0], \"error\": null, \"cause\": null} %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "charge_n2",
+      "States": {
+       "AttemptDone_a1": {
+        "End": true,
+        "Output": "{% $a1_n3 %}",
+        "Type": "Pass"
+       },
+       "charge_n2": {
+        "Arguments": {
+         "FunctionName": "${FnCharge1439edArn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.charge\", \"execution\": $states.context.Execution.Name, \"node\": \"n2\", \"args\": {\"order\": {\"order\": \"o\", \"n\": $input.n}}} %}"
+        },
+        "Assign": {
+         "a1_n2": "{% $states.result.Payload %}"
+        },
+        "Next": "notify_n3",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       },
+       "notify_n3": {
+        "Arguments": {
+         "FunctionName": "${FnNotify265a3bArn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.notify\", \"execution\": $states.context.Execution.Name, \"node\": \"n3\", \"args\": {\"msg\": $a1_n2}} %}"
+        },
+        "Assign": {
+         "a1_n3": "{% $states.result.Payload %}"
+        },
+        "Next": "AttemptDone_a1",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       }
+      }
+     }
+    ],
+    "Catch": [
+     {
+      "Assign": {
+       "a1": "{% {\"ok\": false, \"v\": null, \"error\": $states.errorOutput.Error, \"cause\": {\"$sw\": 1, \"c\": $states.errorOutput.Cause}} %}"
+      },
+      "ErrorEquals": [
+       "States.ALL"
+      ],
+      "Next": "Choice_c4",
+      "Output": "{% {} %}"
+     }
+    ],
+    "Next": "Choice_c4",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   },
+   "Choice_c4": {
+    "Choices": [
+     {
+      "Condition": "{% ($a1.ok = true) %}",
+      "Next": "Join_c4b0"
+     }
+    ],
+    "Default": "Join_c4b1",
+    "Type": "Choice"
+   },
+   "Done_main": {
+    "End": true,
+    "Output": "{% $phi5 %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "Attempt_a1",
+    "Type": "Pass"
+   },
+   "Join_c4b0": {
+    "Assign": {
+     "phi5": "{% $a1.v %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c4b1": {
+    "Assign": {
+     "phi5": "{% {\"error\": $a1.error} %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   }
+  }
+ }
+}

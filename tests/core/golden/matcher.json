@@ -1,0 +1,173 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Choice_c1": {
+    "Choices": [
+     {
+      "Condition": "{% ($input.tier = \"gold\") %}",
+      "Next": "double_n2"
+     },
+     {
+      "Condition": "{% ($input.tier = \"silver\") %}",
+      "Next": "double_n4"
+     }
+    ],
+    "Default": "Choice_c5",
+    "Type": "Choice"
+   },
+   "Choice_c5": {
+    "Choices": [
+     {
+      "Condition": "{% ($input.tier = \"review\") %}",
+      "Next": "Choice_c7"
+     }
+    ],
+    "Default": "Fail_f6",
+    "Type": "Choice"
+   },
+   "Choice_c7": {
+    "Choices": [
+     {
+      "Condition": "{% ($input.value > 0.5) %}",
+      "Next": "double_n9"
+     }
+    ],
+    "Default": "Fail_f8",
+    "Type": "Choice"
+   },
+   "Done_main": {
+    "End": true,
+    "Output": "{% $phi11 %}",
+    "Type": "Pass"
+   },
+   "Fail_f6": {
+    "Cause": "score below threshold",
+    "Error": "LowScore",
+    "Type": "Fail"
+   },
+   "Fail_f8": {
+    "Cause": "score below threshold",
+    "Error": "LowScore",
+    "Type": "Fail"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "Choice_c1",
+    "Type": "Pass"
+   },
+   "Join_c1b0": {
+    "Assign": {
+     "phi11": "{% $n2 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c1b1": {
+    "Assign": {
+     "phi11": "{% $n4 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c1b2": {
+    "Assign": {
+     "phi11": "{% $n9 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "double_n2": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n2\", \"args\": {\"x\": 1}} %}"
+    },
+    "Assign": {
+     "n2": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c1b0",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "double_n4": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n4\", \"args\": {\"x\": 1}} %}"
+    },
+    "Assign": {
+     "n4": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c1b1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "double_n9": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n9\", \"args\": {\"x\": 2}} %}"
+    },
+    "Assign": {
+     "n9": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c1b2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   }
+  }
+ }
+}

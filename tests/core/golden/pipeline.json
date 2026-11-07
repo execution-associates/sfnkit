@@ -1,0 +1,766 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Attempt_a23": {
+    "Arguments": {
+     "FunctionName": "${FnCharged136e5Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.charge\", \"execution\": $states.context.Execution.Name, \"node\": \"n24\", \"args\": {\"order\": $phi26}, \"facts\": {\"k_c824221d8e\": [\"$null\"]}} %}"
+    },
+    "Assign": {
+     "a23": "{% {\"ok\": true, \"v\": $states.result.Payload, \"error\": null, \"cause\": null} %}"
+    },
+    "Catch": [
+     {
+      "Assign": {
+       "a23": "{% {\"ok\": false, \"v\": null, \"error\": $states.errorOutput.Error, \"cause\": {\"$sw\": 1, \"c\": $states.errorOutput.Cause}} %}"
+      },
+      "ErrorEquals": [
+       "States.ALL"
+      ],
+      "Next": "Choice_c27",
+      "Output": "{% {} %}"
+     }
+    ],
+    "Next": "Choice_c27",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "Choice_c12": {
+    "Choices": [
+     {
+      "Condition": "{% ($s9.n10.f.k_07117f9a6b = \"gold\") %}",
+      "Next": "publish_n13"
+     },
+     {
+      "Condition": "{% ($s9.n10.f.k_07117f9a6b = \"silver\") %}",
+      "Next": "publish_n15"
+     }
+    ],
+    "Default": "Choice_c16",
+    "Type": "Choice"
+   },
+   "Choice_c16": {
+    "Choices": [
+     {
+      "Condition": "{% ($s9.n10.f.k_07117f9a6b = \"review\") %}",
+      "Next": "Choice_c18"
+     }
+    ],
+    "Default": "Fail_f17",
+    "Type": "Choice"
+   },
+   "Choice_c18": {
+    "Choices": [
+     {
+      "Condition": "{% ($s9.n10.f.k_535b3f6674 > 0.5) %}",
+      "Next": "Wait_w21"
+     }
+    ],
+    "Default": "Fail_f19",
+    "Type": "Choice"
+   },
+   "Choice_c27": {
+    "Choices": [
+     {
+      "Condition": "{% ($a23.ok = true) %}",
+      "Next": "Join_c27b0"
+     },
+     {
+      "Condition": "{% ($a23.error = \"PaymentDeclined\") %}",
+      "Next": "refund_n29"
+     },
+     {
+      "Condition": "{% ($a23.error = \"TimeoutError\") %}",
+      "Next": "refund_n31"
+     }
+    ],
+    "Default": "notify_n32",
+    "Type": "Choice"
+   },
+   "Choice_c36": {
+    "Choices": [
+     {
+      "Condition": "{% ($phi35.f.k_c824221d8e = true) %}",
+      "Next": "notify_n37"
+     }
+    ],
+    "Default": "Done_main",
+    "Type": "Choice"
+   },
+   "Done_main": {
+    "End": true,
+    "Output": "{% {\"receipt\": $phi35, \"audit\": $s9.n11} %}",
+    "Type": "Pass"
+   },
+   "Fail_f17": {
+    "Cause": "score below 0.5",
+    "Error": "LowScore",
+    "Type": "Fail"
+   },
+   "Fail_f19": {
+    "Cause": "score below 0.5",
+    "Error": "LowScore",
+    "Type": "Fail"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{\"label\": \"run\"}, $states.input]) %}"
+    },
+    "Next": "fetch_n1",
+    "Type": "Pass"
+   },
+   "Join_c12b0": {
+    "Assign": {
+     "phi26": "{% $n13 %}"
+    },
+    "Next": "Attempt_a23",
+    "Type": "Pass"
+   },
+   "Join_c12b1": {
+    "Assign": {
+     "phi26": "{% $n15 %}"
+    },
+    "Next": "Attempt_a23",
+    "Type": "Pass"
+   },
+   "Join_c12b2": {
+    "Assign": {
+     "phi26": "{% $n22 %}"
+    },
+    "Next": "Attempt_a23",
+    "Type": "Pass"
+   },
+   "Join_c27b0": {
+    "Assign": {
+     "phi35": "{% {\"$sw\": 1, \"x\": $a23.v, \"f\": {\"k_c824221d8e\": $a23.v.f.k_c824221d8e}} %}"
+    },
+    "Next": "Choice_c36",
+    "Type": "Pass"
+   },
+   "Join_c27b1": {
+    "Assign": {
+     "phi35": "{% {\"$sw\": 1, \"x\": $n29, \"f\": {\"k_c824221d8e\": $n29.f.k_c824221d8e}} %}"
+    },
+    "Next": "Choice_c36",
+    "Type": "Pass"
+   },
+   "Join_c27b2": {
+    "Assign": {
+     "phi35": "{% {\"$sw\": 1, \"x\": $n31, \"f\": {\"k_c824221d8e\": $n31.f.k_c824221d8e}} %}"
+    },
+    "Next": "Choice_c36",
+    "Type": "Pass"
+   },
+   "Join_c27b3": {
+    "Assign": {
+     "phi35": "{% {\"$sw\": 1, \"x\": null, \"f\": {\"k_c824221d8e\": true}} %}"
+    },
+    "Next": "Choice_c36",
+    "Type": "Pass"
+   },
+   "Parallel_p1": {
+    "Assign": {
+     "m2": "{% $states.result[0].m2 %}",
+     "m5": "{% $states.result[1].m5 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "Map_m2",
+      "States": {
+       "BranchDone_p1b0": {
+        "End": true,
+        "Output": "{% {\"m2\": $p1b0_m2} %}",
+        "Type": "Pass"
+       },
+       "Map_m2": {
+        "Assign": {
+         "p1b0_m2": "{% {\"$sw\": 1, \"v\": $states.result} %}"
+        },
+        "ItemProcessor": {
+         "ProcessorConfig": {
+          "Mode": "INLINE"
+         },
+         "StartAt": "Item_m2",
+         "States": {
+          "ItemDone_m2": {
+           "End": true,
+           "Output": "{% $p1b0_m2_n4 %}",
+           "Type": "Pass"
+          },
+          "Item_m2": {
+           "Assign": {
+            "p1b0_m2_index": "{% $states.input.index %}",
+            "p1b0_m2_item": "{% $states.input.item %}"
+           },
+           "Next": "parse_n4",
+           "Type": "Pass"
+          },
+          "parse_n4": {
+           "Arguments": {
+            "FunctionName": "${FnParse39a1b9Arn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.parse\", \"execution\": $states.context.Execution.Name, \"node\": \"n4\", \"args\": {\"doc\": $p1b0_m2_item}} %}"
+           },
+           "Assign": {
+            "p1b0_m2_n4": "{% $states.result.Payload %}"
+           },
+           "Next": "ItemDone_m2",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "ValueError"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 2
+            },
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          }
+         }
+        },
+        "ItemSelector": {
+         "index": "{% $states.context.Map.Item.Index %}",
+         "item": "{% $states.context.Map.Item.Value %}"
+        },
+        "Items": "{% $n1.it.k_b54cc6f168 %}",
+        "MaxConcurrency": 10,
+        "Next": "BranchDone_p1b0",
+        "Output": "{% {} %}",
+        "Type": "Map"
+       }
+      }
+     },
+     {
+      "StartAt": "Map_m5",
+      "States": {
+       "BranchDone_p1b1": {
+        "End": true,
+        "Output": "{% {\"m5\": $p1b1_m5} %}",
+        "Type": "Pass"
+       },
+       "Map_m5": {
+        "Assign": {
+         "p1b1_m5": "{% {\"$sw\": 1, \"dmap\": $states.result.ResultWriterDetails} %}"
+        },
+        "ItemProcessor": {
+         "ProcessorConfig": {
+          "ExecutionType": "STANDARD",
+          "Mode": "DISTRIBUTED"
+         },
+         "StartAt": "Item_m5",
+         "States": {
+          "ItemDone_m5": {
+           "End": true,
+           "Output": "{% {\"$sw\": 1, \"x\": $p1b1_m5_n8, \"i\": $p1b1_m5_index} %}",
+           "Type": "Pass"
+          },
+          "Item_m5": {
+           "Assign": {
+            "p1b1_m5_index": "{% $states.input.index %}",
+            "p1b1_m5_item": "{% $states.input.item %}",
+            "p1b1_m5_v_input": "{% $states.input.free.input %}"
+           },
+           "Next": "parse_n7",
+           "Type": "Pass"
+          },
+          "enrich_n8": {
+           "Arguments": {
+            "FunctionName": "${FnEnrich5b6278Arn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.enrich\", \"execution\": $states.context.Execution.Name, \"node\": \"n8\", \"args\": {\"row\": $p1b1_m5_n7, \"label\": $p1b1_m5_v_input.label}} %}"
+           },
+           "Assign": {
+            "p1b1_m5_n8": "{% $states.result.Payload %}"
+           },
+           "Next": "ItemDone_m5",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          },
+          "parse_n7": {
+           "Arguments": {
+            "FunctionName": "${FnParse39a1b9Arn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.parse\", \"execution\": $states.context.Execution.Name, \"node\": \"n7\", \"args\": {\"doc\": $p1b1_m5_item}} %}"
+           },
+           "Assign": {
+            "p1b1_m5_n7": "{% $states.result.Payload %}"
+           },
+           "Next": "enrich_n8",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "ValueError"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 2
+            },
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          }
+         }
+        },
+        "ItemReader": {
+         "Arguments": {
+          "Bucket": "{% $n1.it.k_4ad4a146fc.bucket %}",
+          "Key": "{% $n1.it.k_4ad4a146fc.key %}"
+         },
+         "ReaderConfig": {
+          "InputType": "JSON"
+         },
+         "Resource": "arn:aws:states:::s3:getObject"
+        },
+        "ItemSelector": {
+         "free": "{% {\"input\": $input} %}",
+         "index": "{% $states.context.Map.Item.Index %}",
+         "item": "{% $states.context.Map.Item.Value %}"
+        },
+        "MaxConcurrency": 50,
+        "Next": "BranchDone_p1b1",
+        "Output": "{% {} %}",
+        "ResultWriter": {
+         "Arguments": {
+          "Bucket": "${ArtifactsBucket}",
+          "Prefix": "{% 'runs/' & $states.context.Execution.Name & '/m5/results' %}"
+         },
+         "Resource": "arn:aws:states:::s3:putObject"
+        },
+        "Type": "Map"
+       }
+      }
+     }
+    ],
+    "Next": "scoring_s9",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   },
+   "Wait_w21": {
+    "Next": "queue_for_review_n22",
+    "Seconds": 2,
+    "Type": "Wait"
+   },
+   "fetch_n1": {
+    "Arguments": {
+     "FunctionName": "${FnFetch142a52Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.fetch\", \"execution\": $states.context.Execution.Name, \"node\": \"n1\", \"args\": {\"url\": $input.url}, \"items\": {\"k_b54cc6f168\": {\"path\": [], \"mode\": \"inline\", \"facts\": {}}, \"k_4ad4a146fc\": {\"path\": [], \"mode\": \"s3\", \"facts\": {}}}} %}"
+    },
+    "Assign": {
+     "n1": "{% $states.result.Payload %}"
+    },
+    "Next": "Parallel_p1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 150,
+    "Type": "Task"
+   },
+   "notify_n32": {
+    "Arguments": {
+     "FunctionName": "${FnNotify265a3bArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.notify\", \"execution\": $states.context.Execution.Name, \"node\": \"n32\", \"args\": {\"msg\": {\"error\": $a23.error, \"cause\": $a23.cause}}} %}"
+    },
+    "Assign": {
+     "n32": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c27b3",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "notify_n37": {
+    "Arguments": {
+     "FunctionName": "${FnNotify265a3bArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.notify\", \"execution\": $states.context.Execution.Name, \"node\": \"n37\", \"args\": {\"msg\": {\"msg\": \"no receipt\"}}} %}"
+    },
+    "Assign": {
+     "n37": "{% $states.result.Payload %}"
+    },
+    "Next": "Done_main",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "publish_n13": {
+    "Arguments": {
+     "FunctionName": "${FnPublishe1c9e8Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.publish\", \"execution\": $states.context.Execution.Name, \"node\": \"n13\", \"args\": {\"rows\": $m2}} %}"
+    },
+    "Assign": {
+     "n13": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c12b0",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "publish_n15": {
+    "Arguments": {
+     "FunctionName": "${FnPublishe1c9e8Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.publish\", \"execution\": $states.context.Execution.Name, \"node\": \"n15\", \"args\": {\"rows\": $m2}} %}"
+    },
+    "Assign": {
+     "n15": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c12b1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "queue_for_review_n22": {
+    "Arguments": {
+     "FunctionName": "${FnQueueForReviewcd179fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.queue_for_review\", \"execution\": $states.context.Execution.Name, \"node\": \"n22\", \"args\": {\"rows\": $m2}} %}"
+    },
+    "Assign": {
+     "n22": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c12b2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "refund_n29": {
+    "Arguments": {
+     "FunctionName": "${FnRefund590b2eArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.refund\", \"execution\": $states.context.Execution.Name, \"node\": \"n29\", \"args\": {\"order\": $phi26, \"cause\": $a23.cause}, \"facts\": {\"k_c824221d8e\": [\"$null\"]}} %}"
+    },
+    "Assign": {
+     "n29": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c27b1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "refund_n31": {
+    "Arguments": {
+     "FunctionName": "${FnRefund590b2eArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.refund\", \"execution\": $states.context.Execution.Name, \"node\": \"n31\", \"args\": {\"order\": $phi26, \"cause\": $a23.cause}, \"facts\": {\"k_c824221d8e\": [\"$null\"]}} %}"
+    },
+    "Assign": {
+     "n31": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c27b2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "scoring_s9": {
+    "Arguments": {
+     "Input": "{% {\"free\": {\"m5\": $m5}, \"AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID\": $states.context.Execution.Id} %}",
+     "StateMachineArn": "${SmScoringArn}"
+    },
+    "Assign": {
+     "s9": "{% $states.result.Output %}"
+    },
+    "Next": "Choice_c12",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::states:startExecution.sync:2",
+    "Type": "Task"
+   }
+  }
+ },
+ "scoring": {
+  "Comment": "sfnkit subworkflow scoring",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_scoring",
+  "States": {
+   "Done_scoring": {
+    "End": true,
+    "Output": "{% {\"n10\": $n10, \"n11\": $n11} %}",
+    "Type": "Pass"
+   },
+   "Init_scoring": {
+    "Assign": {
+     "v_m5": "{% $states.input.free.m5 %}"
+    },
+    "Next": "Parallel_p2",
+    "Type": "Pass"
+   },
+   "Parallel_p2": {
+    "Assign": {
+     "n10": "{% $states.result[0].n10 %}",
+     "n11": "{% $states.result[1].n11 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "score_rows_n10",
+      "States": {
+       "BranchDone_p2b0": {
+        "End": true,
+        "Output": "{% {\"n10\": $p2b0_n10} %}",
+        "Type": "Pass"
+       },
+       "score_rows_n10": {
+        "Arguments": {
+         "FunctionName": "${FnScoreRows8b0bcfArn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.score_rows\", \"execution\": $states.context.Execution.Name, \"node\": \"n10\", \"args\": {\"rows\": $v_m5}, \"facts\": {\"k_07117f9a6b\": [\"tier\"], \"k_535b3f6674\": [\"value\"]}} %}"
+        },
+        "Assign": {
+         "p2b0_n10": "{% $states.result.Payload %}"
+        },
+        "Next": "BranchDone_p2b0",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       }
+      }
+     },
+     {
+      "StartAt": "audit_rows_n11",
+      "States": {
+       "BranchDone_p2b1": {
+        "End": true,
+        "Output": "{% {\"n11\": $p2b1_n11} %}",
+        "Type": "Pass"
+       },
+       "audit_rows_n11": {
+        "Arguments": {
+         "FunctionName": "${FnAuditRows42baf5Arn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.audit_rows\", \"execution\": $states.context.Execution.Name, \"node\": \"n11\", \"args\": {\"rows\": $v_m5}} %}"
+        },
+        "Assign": {
+         "p2b1_n11": "{% $states.result.Payload %}"
+        },
+        "Next": "BranchDone_p2b1",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       }
+      }
+     }
+    ],
+    "Next": "Done_scoring",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   }
+  }
+ }
+}

@@ -1,0 +1,79 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Done_main": {
+    "End": true,
+    "Output": "{% $n2 %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "double_n1",
+    "Type": "Pass"
+   },
+   "add_n2": {
+    "Arguments": {
+     "FunctionName": "${FnAdda34d56Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.add\", \"execution\": $states.context.Execution.Name, \"node\": \"n2\", \"args\": {\"a\": $n1, \"b\": $input.x}} %}"
+    },
+    "Assign": {
+     "n2": "{% $states.result.Payload %}"
+    },
+    "Next": "Done_main",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "double_n1": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n1\", \"args\": {\"x\": $input.x}} %}"
+    },
+    "Assign": {
+     "n1": "{% $states.result.Payload %}"
+    },
+    "Next": "add_n2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   }
+  }
+ }
+}

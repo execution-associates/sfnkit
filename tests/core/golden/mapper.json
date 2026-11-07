@@ -1,0 +1,495 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Done_main": {
+    "End": true,
+    "Output": "{% {\"score\": $n13, \"audit\": $n14, \"enriched\": $m5} %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{\"label\": \"run\"}, $states.input]) %}"
+    },
+    "Next": "fetch_n1",
+    "Type": "Pass"
+   },
+   "Parallel_p1": {
+    "Assign": {
+     "m2": "{% $states.result[0].m2 %}",
+     "m5": "{% $states.result[1].m5 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "Map_m2",
+      "States": {
+       "BranchDone_p1b0": {
+        "End": true,
+        "Output": "{% {\"m2\": $p1b0_m2} %}",
+        "Type": "Pass"
+       },
+       "Map_m2": {
+        "Assign": {
+         "p1b0_m2": "{% {\"$sw\": 1, \"v\": $states.result} %}"
+        },
+        "ItemProcessor": {
+         "ProcessorConfig": {
+          "Mode": "INLINE"
+         },
+         "StartAt": "Item_m2",
+         "States": {
+          "ItemDone_m2": {
+           "End": true,
+           "Output": "{% $p1b0_m2_n4 %}",
+           "Type": "Pass"
+          },
+          "Item_m2": {
+           "Assign": {
+            "p1b0_m2_index": "{% $states.input.index %}",
+            "p1b0_m2_item": "{% $states.input.item %}"
+           },
+           "Next": "parse_n4",
+           "Type": "Pass"
+          },
+          "parse_n4": {
+           "Arguments": {
+            "FunctionName": "${FnParse39a1b9Arn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.parse\", \"execution\": $states.context.Execution.Name, \"node\": \"n4\", \"args\": {\"doc\": $p1b0_m2_item}} %}"
+           },
+           "Assign": {
+            "p1b0_m2_n4": "{% $states.result.Payload %}"
+           },
+           "Next": "ItemDone_m2",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "ValueError"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 2
+            },
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          }
+         }
+        },
+        "ItemSelector": {
+         "index": "{% $states.context.Map.Item.Index %}",
+         "item": "{% $states.context.Map.Item.Value %}"
+        },
+        "Items": "{% $n1.it.k_b54cc6f168 %}",
+        "MaxConcurrency": 2,
+        "Next": "BranchDone_p1b0",
+        "Output": "{% {} %}",
+        "Type": "Map"
+       }
+      }
+     },
+     {
+      "StartAt": "Map_m5",
+      "States": {
+       "BranchDone_p1b1": {
+        "End": true,
+        "Output": "{% {\"m5\": $p1b1_m5} %}",
+        "Type": "Pass"
+       },
+       "Map_m5": {
+        "Assign": {
+         "p1b1_m5": "{% {\"$sw\": 1, \"dmap\": $states.result.ResultWriterDetails} %}"
+        },
+        "ItemProcessor": {
+         "ProcessorConfig": {
+          "ExecutionType": "STANDARD",
+          "Mode": "DISTRIBUTED"
+         },
+         "StartAt": "Item_m5",
+         "States": {
+          "Choice_c8": {
+           "Choices": [
+            {
+             "Condition": "{% ($p1b1_m5_n7.f.k_867b8f8cff > 100) %}",
+             "Next": "enrich_n9"
+            }
+           ],
+           "Default": "enrich_n10",
+           "Type": "Choice"
+          },
+          "ItemDone_m5": {
+           "End": true,
+           "Output": "{% {\"$sw\": 1, \"x\": $p1b1_m5_phi11, \"i\": $p1b1_m5_index} %}",
+           "Type": "Pass"
+          },
+          "Item_m5": {
+           "Assign": {
+            "p1b1_m5_index": "{% $states.input.index %}",
+            "p1b1_m5_item": "{% $states.input.item %}",
+            "p1b1_m5_v_input": "{% $states.input.free.input %}"
+           },
+           "Next": "parse_n7",
+           "Type": "Pass"
+          },
+          "Join_c8b0": {
+           "Assign": {
+            "p1b1_m5_phi11": "{% $p1b1_m5_n9 %}"
+           },
+           "Next": "ItemDone_m5",
+           "Type": "Pass"
+          },
+          "Join_c8b1": {
+           "Assign": {
+            "p1b1_m5_phi11": "{% $p1b1_m5_n10 %}"
+           },
+           "Next": "ItemDone_m5",
+           "Type": "Pass"
+          },
+          "enrich_n10": {
+           "Arguments": {
+            "FunctionName": "${FnEnrichefc69dArn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.enrich\", \"execution\": $states.context.Execution.Name, \"node\": \"n10\", \"args\": {\"row\": $p1b1_m5_n7, \"label\": $p1b1_m5_v_input.label}} %}"
+           },
+           "Assign": {
+            "p1b1_m5_n10": "{% $states.result.Payload %}"
+           },
+           "Next": "Join_c8b1",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          },
+          "enrich_n9": {
+           "Arguments": {
+            "FunctionName": "${FnEnrichefc69dArn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.enrich\", \"execution\": $states.context.Execution.Name, \"node\": \"n9\", \"args\": {\"row\": $p1b1_m5_n7, \"label\": \"long\"}} %}"
+           },
+           "Assign": {
+            "p1b1_m5_n9": "{% $states.result.Payload %}"
+           },
+           "Next": "Join_c8b0",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          },
+          "parse_n7": {
+           "Arguments": {
+            "FunctionName": "${FnParse39a1b9Arn}",
+            "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.parse\", \"execution\": $states.context.Execution.Name, \"node\": \"n7\", \"args\": {\"doc\": $p1b1_m5_item}, \"facts\": {\"k_867b8f8cff\": [\"len\"]}} %}"
+           },
+           "Assign": {
+            "p1b1_m5_n7": "{% $states.result.Payload %}"
+           },
+           "Next": "Choice_c8",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::lambda:invoke",
+           "Retry": [
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "ValueError"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 2
+            },
+            {
+             "BackoffRate": 2.0,
+             "ErrorEquals": [
+              "Lambda.ClientExecutionTimeoutException",
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException"
+             ],
+             "IntervalSeconds": 1,
+             "JitterStrategy": "FULL",
+             "MaxAttempts": 3
+            }
+           ],
+           "TimeoutSeconds": 90,
+           "Type": "Task"
+          }
+         }
+        },
+        "ItemReader": {
+         "Arguments": {
+          "Bucket": "{% $n1.it.k_4ad4a146fc.bucket %}",
+          "Key": "{% $n1.it.k_4ad4a146fc.key %}"
+         },
+         "ReaderConfig": {
+          "InputType": "JSON"
+         },
+         "Resource": "arn:aws:states:::s3:getObject"
+        },
+        "ItemSelector": {
+         "free": "{% {\"input\": $input} %}",
+         "index": "{% $states.context.Map.Item.Index %}",
+         "item": "{% $states.context.Map.Item.Value %}"
+        },
+        "Next": "BranchDone_p1b1",
+        "Output": "{% {} %}",
+        "ResultWriter": {
+         "Arguments": {
+          "Bucket": "${ArtifactsBucket}",
+          "Prefix": "{% 'runs/' & $states.context.Execution.Name & '/m5/results' %}"
+         },
+         "Resource": "arn:aws:states:::s3:putObject"
+        },
+        "Type": "Map"
+       }
+      }
+     }
+    ],
+    "Next": "Parallel_p2",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   },
+   "Parallel_p2": {
+    "Assign": {
+     "n13": "{% $states.result[0].n13 %}",
+     "n14": "{% $states.result[0].n14 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "scoring_s12",
+      "States": {
+       "BranchDone_p2b0": {
+        "End": true,
+        "Output": "{% {\"n13\": $p2b0_s12.n13, \"n14\": $p2b0_s12.n14} %}",
+        "Type": "Pass"
+       },
+       "scoring_s12": {
+        "Arguments": {
+         "Input": "{% {\"free\": {\"m2\": $m2, \"m5\": $m5}, \"AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID\": $states.context.Execution.Id} %}",
+         "StateMachineArn": "${SmScoringArn}"
+        },
+        "Assign": {
+         "p2b0_s12": "{% $states.result.Output %}"
+        },
+        "Next": "BranchDone_p2b0",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::states:startExecution.sync:2",
+        "Type": "Task"
+       }
+      }
+     },
+     {
+      "StartAt": "Choice_c15",
+      "States": {
+       "BranchDone_p2b1": {
+        "End": true,
+        "Output": "{% {} %}",
+        "Type": "Pass"
+       },
+       "Choice_c15": {
+        "Choices": [
+         {
+          "Condition": "{% ($count($m2.v) > 0) %}",
+          "Next": "Wait_w17"
+         }
+        ],
+        "Default": "BranchDone_p2b1",
+        "Type": "Choice"
+       },
+       "Wait_w17": {
+        "Next": "BranchDone_p2b1",
+        "Seconds": 1,
+        "Type": "Wait"
+       }
+      }
+     }
+    ],
+    "Next": "Done_main",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   },
+   "fetch_n1": {
+    "Arguments": {
+     "FunctionName": "${FnFetch0580e4Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.fetch\", \"execution\": $states.context.Execution.Name, \"node\": \"n1\", \"args\": {\"url\": $input.url}, \"items\": {\"k_b54cc6f168\": {\"path\": [], \"mode\": \"inline\", \"facts\": {}}, \"k_4ad4a146fc\": {\"path\": [], \"mode\": \"s3\", \"facts\": {}}}} %}"
+    },
+    "Assign": {
+     "n1": "{% $states.result.Payload %}"
+    },
+    "Next": "Parallel_p1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 150,
+    "Type": "Task"
+   }
+  }
+ },
+ "scoring": {
+  "Comment": "sfnkit subworkflow scoring",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_scoring",
+  "States": {
+   "Done_scoring": {
+    "End": true,
+    "Output": "{% {\"n13\": $n13, \"n14\": $n14} %}",
+    "Type": "Pass"
+   },
+   "Init_scoring": {
+    "Assign": {
+     "v_m2": "{% $states.input.free.m2 %}",
+     "v_m5": "{% $states.input.free.m5 %}"
+    },
+    "Next": "Parallel_p3",
+    "Type": "Pass"
+   },
+   "Parallel_p3": {
+    "Assign": {
+     "n13": "{% $states.result[0].n13 %}",
+     "n14": "{% $states.result[1].n14 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "score_rows_n13",
+      "States": {
+       "BranchDone_p3b0": {
+        "End": true,
+        "Output": "{% {\"n13\": $p3b0_n13} %}",
+        "Type": "Pass"
+       },
+       "score_rows_n13": {
+        "Arguments": {
+         "FunctionName": "${FnScoreRows2f8b17Arn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.score_rows\", \"execution\": $states.context.Execution.Name, \"node\": \"n13\", \"args\": {\"rows\": $v_m2}} %}"
+        },
+        "Assign": {
+         "p3b0_n13": "{% $states.result.Payload %}"
+        },
+        "Next": "BranchDone_p3b0",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       }
+      }
+     },
+     {
+      "StartAt": "audit_rows_n14",
+      "States": {
+       "BranchDone_p3b1": {
+        "End": true,
+        "Output": "{% {\"n14\": $p3b1_n14} %}",
+        "Type": "Pass"
+       },
+       "audit_rows_n14": {
+        "Arguments": {
+         "FunctionName": "${FnAuditRows43c5fbArn}",
+         "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.audit_rows\", \"execution\": $states.context.Execution.Name, \"node\": \"n14\", \"args\": {\"rows\": $v_m5}} %}"
+        },
+        "Assign": {
+         "p3b1_n14": "{% $states.result.Payload %}"
+        },
+        "Next": "BranchDone_p3b1",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Retry": [
+         {
+          "BackoffRate": 2.0,
+          "ErrorEquals": [
+           "Lambda.ClientExecutionTimeoutException",
+           "Lambda.ServiceException",
+           "Lambda.AWSLambdaException",
+           "Lambda.SdkClientException",
+           "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 3
+         }
+        ],
+        "TimeoutSeconds": 90,
+        "Type": "Task"
+       }
+      }
+     }
+    ],
+    "Next": "Done_scoring",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   }
+  }
+ }
+}

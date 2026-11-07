@@ -1,0 +1,172 @@
+{
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Choice_c2": {
+    "Choices": [
+     {
+      "Condition": "{% ($n1.f.k_97d170e155 > 10) %}",
+      "Next": "add_n3"
+     },
+     {
+      "Condition": "{% ($n1.f.k_97d170e155 > 4) %}",
+      "Next": "add_n5"
+     }
+    ],
+    "Default": "add_n6",
+    "Type": "Choice"
+   },
+   "Done_main": {
+    "End": true,
+    "Output": "{% {\"z\": $phi8, \"y\": $n1} %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "double_n1",
+    "Type": "Pass"
+   },
+   "Join_c2b0": {
+    "Assign": {
+     "phi8": "{% $n3 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c2b1": {
+    "Assign": {
+     "phi8": "{% $n5 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "Join_c2b2": {
+    "Assign": {
+     "phi8": "{% $n6 %}"
+    },
+    "Next": "Done_main",
+    "Type": "Pass"
+   },
+   "add_n3": {
+    "Arguments": {
+     "FunctionName": "${FnAdda34d56Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.add\", \"execution\": $states.context.Execution.Name, \"node\": \"n3\", \"args\": {\"a\": $n1, \"b\": 1}} %}"
+    },
+    "Assign": {
+     "n3": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c2b0",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "add_n5": {
+    "Arguments": {
+     "FunctionName": "${FnAdda34d56Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.add\", \"execution\": $states.context.Execution.Name, \"node\": \"n5\", \"args\": {\"a\": $n1, \"b\": 2}} %}"
+    },
+    "Assign": {
+     "n5": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c2b1",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "add_n6": {
+    "Arguments": {
+     "FunctionName": "${FnAdda34d56Arn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.add\", \"execution\": $states.context.Execution.Name, \"node\": \"n6\", \"args\": {\"a\": $n1, \"b\": 3}} %}"
+    },
+    "Assign": {
+     "n6": "{% $states.result.Payload %}"
+    },
+    "Next": "Join_c2b2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   },
+   "double_n1": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n1\", \"args\": {\"x\": $input.x}, \"facts\": {\"k_97d170e155\": []}} %}"
+    },
+    "Assign": {
+     "n1": "{% $states.result.Payload %}"
+    },
+    "Next": "Choice_c2",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   }
+  }
+ }
+}

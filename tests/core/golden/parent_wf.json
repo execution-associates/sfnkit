@@ -1,0 +1,160 @@
+{
+ "child-wf": {
+  "Comment": "sfnkit call child-wf",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_child-wf",
+  "States": {
+   "Done_child-wf": {
+    "End": true,
+    "Output": "{% $n1 %}",
+    "Type": "Pass"
+   },
+   "Init_child-wf": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "double_n1",
+    "Type": "Pass"
+   },
+   "double_n1": {
+    "Arguments": {
+     "FunctionName": "${FnDoubleedee1fArn}",
+     "Payload": "{% {\"sw\": 1, \"step\": \"tests.core.flows.double\", \"execution\": $states.context.Execution.Name, \"node\": \"n1\", \"args\": {\"x\": $input.x}} %}"
+    },
+    "Assign": {
+     "n1": "{% $states.result.Payload %}"
+    },
+    "Next": "Done_child-wf",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Retry": [
+     {
+      "BackoffRate": 2.0,
+      "ErrorEquals": [
+       "Lambda.ClientExecutionTimeoutException",
+       "Lambda.ServiceException",
+       "Lambda.AWSLambdaException",
+       "Lambda.SdkClientException",
+       "Lambda.TooManyRequestsException"
+      ],
+      "IntervalSeconds": 1,
+      "JitterStrategy": "FULL",
+      "MaxAttempts": 3
+     }
+    ],
+    "TimeoutSeconds": 90,
+    "Type": "Task"
+   }
+  }
+ },
+ "main": {
+  "Comment": "sfnkit root main",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init_main",
+  "States": {
+   "Done_main": {
+    "End": true,
+    "Output": "{% {\"a\": $n1, \"b\": $m2} %}",
+    "Type": "Pass"
+   },
+   "Init_main": {
+    "Assign": {
+     "input": "{% $merge([{}, $states.input]) %}"
+    },
+    "Next": "Parallel_p1",
+    "Type": "Pass"
+   },
+   "Parallel_p1": {
+    "Assign": {
+     "m2": "{% $states.result[1].m2 %}",
+     "n1": "{% $states.result[0].n1 %}"
+    },
+    "Branches": [
+     {
+      "StartAt": "child_wf_n1",
+      "States": {
+       "BranchDone_p1b0": {
+        "End": true,
+        "Output": "{% {\"n1\": $p1b0_n1} %}",
+        "Type": "Pass"
+       },
+       "child_wf_n1": {
+        "Arguments": {
+         "Input": "{% {\"x\": {\"$sw\": 1, \"x\": $input.x}, \"AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID\": $states.context.Execution.Id} %}",
+         "StateMachineArn": "${SmChildWfArn}"
+        },
+        "Assign": {
+         "p1b0_n1": "{% $states.result.Output %}"
+        },
+        "Next": "BranchDone_p1b0",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::states:startExecution.sync:2",
+        "Type": "Task"
+       }
+      }
+     },
+     {
+      "StartAt": "Map_m2",
+      "States": {
+       "BranchDone_p1b1": {
+        "End": true,
+        "Output": "{% {\"m2\": $p1b1_m2} %}",
+        "Type": "Pass"
+       },
+       "Map_m2": {
+        "Assign": {
+         "p1b1_m2": "{% {\"$sw\": 1, \"v\": $states.result} %}"
+        },
+        "ItemProcessor": {
+         "ProcessorConfig": {
+          "Mode": "INLINE"
+         },
+         "StartAt": "Item_m2",
+         "States": {
+          "ItemDone_m2": {
+           "End": true,
+           "Output": "{% $p1b1_m2_n4 %}",
+           "Type": "Pass"
+          },
+          "Item_m2": {
+           "Assign": {
+            "p1b1_m2_index": "{% $states.input.index %}",
+            "p1b1_m2_item": "{% $states.input.item %}"
+           },
+           "Next": "child_wf_n4",
+           "Type": "Pass"
+          },
+          "child_wf_n4": {
+           "Arguments": {
+            "Input": "{% {\"x\": {\"$sw\": 1, \"x\": $p1b1_m2_item}, \"AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID\": $states.context.Execution.Id} %}",
+            "StateMachineArn": "${SmChildWfArn}"
+           },
+           "Assign": {
+            "p1b1_m2_n4": "{% $states.result.Output %}"
+           },
+           "Next": "ItemDone_m2",
+           "Output": "{% {} %}",
+           "Resource": "arn:aws:states:::states:startExecution.sync:2",
+           "Type": "Task"
+          }
+         }
+        },
+        "ItemSelector": {
+         "index": "{% $states.context.Map.Item.Index %}",
+         "item": "{% $states.context.Map.Item.Value %}"
+        },
+        "Items": "{% [1, 2, 3] %}",
+        "Next": "BranchDone_p1b1",
+        "Output": "{% {} %}",
+        "Type": "Map"
+       }
+      }
+     }
+    ],
+    "Next": "Done_main",
+    "Output": "{% {} %}",
+    "Type": "Parallel"
+   }
+  }
+ }
+}

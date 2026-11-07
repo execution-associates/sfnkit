@@ -1,0 +1,24 @@
+# Dev sandbox for sfnkit: installs, builds, tests and image builds run here, never on the host.
+# Docker runs nested inside this container (security.nesting) to build Lambda images.
+name: sfnkit-dev
+volumes:
+  mise: { name: "sfnkit-dev-mise" }
+services:
+  dev:
+    container_name: sfnkit-dev
+    image: dev-base
+    cpus: 8
+    mem_limit: 16g
+    idmap: auto
+    labels: { owner: sfnkit }
+    raw_config:
+      security.nesting: "true"
+      security.syscalls.intercept.mknod: "true"
+      security.syscalls.intercept.setxattr: "true"
+    volumes:
+      - .:/home/dev/sfnkit
+      - mise:/home/dev/.local/share/mise:owner=dev
+    ready: [running, default_route, { user_exists: dev }]
+    user: dev
+    working_dir: /home/dev/sfnkit
+    command: ["sleep", "infinity"]
