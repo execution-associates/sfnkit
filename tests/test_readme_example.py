@@ -112,3 +112,43 @@ def test_golden():
     if os.environ.get("SFNKIT_UPDATE_GOLDEN") or not path.exists():
         path.write_text(json.dumps(got, indent=1, sort_keys=True) + "\n")
     assert json.loads(path.read_text()) == json.loads(json.dumps(got))
+
+
+def _block(containing: str) -> str:
+    readme = (ROOT / "README.md").read_text()
+    return next(b for b in re.findall(r"```python\n(.*?)```", readme, re.S) if containing in b)
+
+
+def _run_block(code: str, name: str) -> dict:
+    """Run a README block as if it were a module, so its steps pass the module-level check."""
+    import sys
+    import types
+
+    mod = types.ModuleType(name)
+    sys.modules[name] = mod
+    try:
+        exec(compile(code, f"README:{name}", "exec"), mod.__dict__)
+    finally:
+        sys.modules.pop(name, None)
+    return mod.__dict__
+
+
+def test_readme_image_example_defines_everything_it_uses():
+    ns = _run_block(_block("cuda = Image("), "readme_images")
+    assert ns["call_variants"].image.conda == ("samtools=1.21", "bcftools")
+    assert ns["train"].compute.queue.name == "gpu"
+
+
+def test_readme_cdk_example_synthesizes(tmp_path, monkeypatch):
+    import functools
+    import os
+
+    os.environ.setdefault("JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION", "1")
+    cdk = pytest.importorskip("aws_cdk")
+    # CDK_OUTDIR wouldn't reach CDK's node process once it's running, so pin the outdir on App itself.
+    monkeypatch.setattr(cdk, "App", functools.partial(cdk.App, outdir=str(tmp_path / "cdk.out")))
+    monkeypatch.chdir(ROOT)
+    _run_block(_block("SfnkitWorkflow(self"), "readme_cdk")
+    template = json.loads((tmp_path / "cdk.out" / "cohort.template.json").read_text())
+    kinds = [r["Type"] for r in template["Resources"].values()]
+    assert kinds.count("AWS::StepFunctions::StateMachine") == 2 and "AWS::Scheduler::Schedule" in kinds

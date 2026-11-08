@@ -55,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("deploy", help="build images and deploy both stacks")
     common(sp, aws=True)
+    sp.add_argument(
+        "--queue",
+        action="append",
+        default=[],
+        metavar="NAME=ARN",
+        help='bind a named BatchQueue("NAME") to a job queue ARN (repeatable)',
+    )
 
     sp = sub.add_parser("run", help="start an execution of the deployed workflow")
     common(sp, aws=True)
@@ -105,8 +112,14 @@ def cmd_deploy(args) -> int:
     from sfnkit.compile.app import build_app
     from sfnkit.deploy.deployer import deploy
 
+    queues = {}
+    for spec in args.queue:
+        name, sep, arn = spec.partition("=")
+        if not sep or not name or not arn:
+            raise SystemExit(f"--queue expects NAME=ARN, got {spec!r}")
+        queues[name] = arn
     app = build_app(load_workflow(args.target, args.project_dir), project_dir=args.project_dir)
-    res = deploy(app, stack_name=_stack(args, app), session=_session(args))
+    res = deploy(app, stack_name=_stack(args, app), session=_session(args), queues=queues)
     print(json.dumps({"stack": res.stack_name, "state_machine": res.state_machine_arn, "bucket": res.bucket}))
     return 0
 

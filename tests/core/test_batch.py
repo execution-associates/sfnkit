@@ -61,14 +61,28 @@ def by_name(defn: dict) -> dict:
     return dict(states(defn))
 
 
+def staged_envelope(d: dict, node: str) -> str:
+    """The JSONata envelope the state machine writes to S3 before submitting ``node``'s job."""
+    put = d[f"PutInput_{node}"]
+    assert put["Resource"] == "arn:aws:states:::aws-sdk:s3:putObject"
+    return put["Arguments"]["Body"]
+
+
 # ------------------------------------------------------------------------------------------------- ASL
 
 
 def test_single_job_passes_envelope_and_token_and_returns_what_the_container_sends():
-    s = by_name(build_app(ex.batchy).root.definition)["total_n11"]
+    d = by_name(build_app(ex.batchy).root.definition)
+    s = d["total_n11"]
     assert s["Resource"] == "arn:aws:states:::batch:submitJob.sync"
     env = {e["Name"]: e["Value"] for e in s["Arguments"]["ContainerOverrides"]["Environment"]}
-    assert env[P.ENV_ENVELOPE].startswith("{% $string({") and '"node": "n11"' in env[P.ENV_ENVELOPE]
+    # Only a pointer travels in the job: the envelope itself was written to S3 just before.
+    assert env[P.ENV_ENVELOPE] == "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $n11_in}) %}"
+    assert '"node": "n11"' in staged_envelope(d, "n11")
+    assert d["Stage_n11"]["Assign"]["n11_in"].startswith("{% 'runs/' & $states.context.Execution.Name")
+    assert "$uuid()" in d["Stage_n11"]["Assign"]["n11_in"]
+    assert d["Stage_n11"]["Next"] == "PutInput_n11" and d["PutInput_n11"]["Next"] == "total_n11"
+    assert d["PutInput_n11"]["Arguments"]["Key"] == "{% $n11_in %}"
     assert env[P.ENV_TOKEN] == "{% $states.context.Task.Token %}"
     assert "ArrayProperties" not in s["Arguments"]
     assert "TimeoutSeconds" not in s  # queue time is unbounded; the job definition bounds run time
@@ -81,16 +95,13 @@ def test_map_on_a_batch_step_is_one_array_job():
     sq = d["square_m2"]
     args = sq["Arguments"]
     assert args["ArrayProperties"]["Size"].startswith("{% $max([2, $ceil(")
-    envelope = next(
-        e["Value"] for e in args["ContainerOverrides"]["Environment"] if e["Name"] == P.ENV_ENVELOPE
-    )
+    envelope = staged_envelope(d, "m2")
     assert '"array": {"param": "item", "items": $n1.it.k_' in envelope and '"per": 1' in envelope
     assert '"fail_at": $input.fail_at' in envelope  # other arguments are shared by every child
     # an empty list skips the job, and an oversized one fails with a clear error
     check = d["Check_m2"]
-    assert [c["Next"] for c in check["Choices"]] == ["Empty_m2", "TooBig_m2"] and check[
-        "Default"
-    ] == "square_m2"
+    assert [c["Next"] for c in check["Choices"]] == ["Empty_m2", "TooBig_m2"]
+    assert check["Default"] == "Stage_m2" and d["PutInput_m2"]["Next"] == "square_m2"
     assert d["TooBig_m2"]["Error"] == "sfnkit.ArrayTooLarge"
 
 
@@ -98,7 +109,7 @@ def test_array_over_array_results_and_items_per_job():
     d = by_name(build_app(ex.batchy).root.definition)
     s = d["plus_one_m5"]
     assert "$ceil($m2.arr.n / 10)" in s["Arguments"]["ArrayProperties"]["Size"]
-    envelope = s["Arguments"]["ContainerOverrides"]["Environment"][0]["Value"]
+    envelope = staged_envelope(d, "m5")
     assert '"items": $m2.arr' in envelope and '"per": 10' in envelope
 
 
@@ -201,8 +212,55 @@ def test_existing_queue_is_referenced_not_created():
     assert not any(
         r["Type"] in ("AWS::Batch::ComputeEnvironment", "AWS::Batch::JobQueue") for r in res.values()
     )
-    task = next(s for _, s in states(app.root.definition) if s["Type"] == "Task")
+    task = next(s for _, s in states(app.root.definition) if s.get("Resource", "").endswith("submitJob.sync"))
     assert task["Arguments"]["JobQueue"] == SHARED.arn
+
+
+NAMED = BatchQueue("spot-cpu")
+
+
+@step(compute=Batch(queue=NAMED))
+def on_named(x: int) -> int:
+    return x
+
+
+@workflow
+def uses_named(x: int):
+    return on_named(x)
+
+
+def test_named_queue_becomes_a_template_parameter():
+    from sfnkit.compute.batch import queue_param
+
+    app = build_app(uses_named)
+    tpl = main_template(app)
+    pid = queue_param("spot-cpu")
+    assert pid.startswith("QueueSpotCpu") and pid in tpl["Parameters"]
+    assert tpl["Parameters"][pid]["Type"] == "String"
+    (sm,) = [r for r in tpl["Resources"].values() if r["Type"] == "AWS::StepFunctions::StateMachine"]
+    assert {"Ref": pid} in sm["Properties"]["DefinitionSubstitutions"].values()
+    assert _lint_errors(tpl) == []
+
+
+def test_named_queues_must_be_bound_at_deploy():
+    from sfnkit.deploy.deployer import bind_queues
+    from sfnkit.errors import DeployError
+
+    app = build_app(uses_named)
+    with pytest.raises(DeployError, match="--queue spot-cpu=<job queue ARN>"):
+        bind_queues(app, {})
+    with pytest.raises(DeployError, match="no step runs on a queue by that name"):
+        bind_queues(app, {"spot-cpu": "arn:aws:batch:us-west-2:1:job-queue/a", "gpu": "arn:x"})
+    with pytest.raises(DeployError, match="expected a job queue ARN"):
+        bind_queues(app, {"spot-cpu": "my-queue"})
+    arn = "arn:aws:batch:us-west-2:1:job-queue/a"
+    assert bind_queues(app, {"spot-cpu": arn}) == {NAMED.param_id: arn}
+
+
+def test_queue_names_are_checked():
+    with pytest.raises(ValueError, match="short name"):
+        BatchQueue("has space")
+    assert BatchQueue("gpu").name == "gpu" and SHARED.name is None
 
 
 def test_spec_validation():
@@ -392,10 +450,9 @@ def inline_tolerant(items: list):
 
 def test_tolerated_failures_compile_into_the_array_job():
     d = by_name(build_app(ex.batchy).root.definition)
-    s = next(
-        s for s in d.values() if s.get("Resource", "").endswith("submitJob.sync") and "fragile" in str(s)
-    )
-    envelope = s["Arguments"]["ContainerOverrides"]["Environment"][0]["Value"]
+    name, s = next((n, s) for n, s in d.items() if n.startswith("fragile_"))
+    assert s["Resource"].endswith("submitJob.sync")
+    envelope = staged_envelope(d, name.rsplit("_", 1)[1])
     assert '"tolerate": 1' in envelope
     assert '"t": true' in next(iter(s["Assign"].values()))  # missing results read as None
 
@@ -449,6 +506,17 @@ def test_going_over_the_budget_fails_the_step_and_stops_the_array(s3):
     assert kind == "failure" and kw["error"] == "ToleratedFailureExceeded"
     assert "item 0: ValueError: item 0 is bad" in json.loads(kw["cause"])["errorMessage"]
     assert batch.terminated == ["job-8"]
+
+
+def test_staged_envelope_is_read_as_is(s3):
+    """The state machine stages every Batch envelope in S3. The items locator inside must reach the
+    array runtime untouched, not be read eagerly as if it were the value."""
+    loc = _put_items(s3, [{"i": i} for i in range(3)])
+    key = "runs/ex1/m9/in/1234.json"
+    s3.put_object(Bucket="art", Key=key, Body=json.dumps(_fragile_envelope(loc, [], tolerate=None)))
+    env = _env({"$sw": 1, "s3": f"s3://art/{key}"}, AWS_BATCH_JOB_ARRAY_INDEX="0", AWS_BATCH_JOB_ID="job-6:0")
+    assert container.main(environ=env, sfn=FakeSfn(), s3=s3) == 0
+    assert _results(s3) == ["0.json", "1.json", "2.json"]
 
 
 def test_a_rerun_only_runs_items_without_a_result(s3):

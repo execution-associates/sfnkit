@@ -16,6 +16,9 @@ Optional capabilities, as class attributes:
     compiler rejects the step inside an EXPRESS workflow or an EXPRESS Distributed Map child.
   * ``supports_array`` + ``array_task_state``: ``step.map(items)`` becomes one native array job
     instead of a Map state (see ``sfnkit.compute.batch``).
+  * ``stage_envelope``: the state machine writes the envelope to the artifacts bucket first and the
+    Task gets an S3 wrapper in its place, for services that cap request sizes well below 256 KiB.
+  * ``parameters``: template parameters the resources reference (a queue bound at deploy time, say).
 
 Runtime side: every backend must deliver the envelope from ``sfnkit.runtime.protocol`` to
 ``sfnkit.runtime.execute.execute`` and hand its returned wrapper back to Step Functions. Lambda does
@@ -91,6 +94,11 @@ class ComputeBackend(ABC):
     image_runtime: ClassVar[str] = "lambda"
     standard_only: ClassVar[bool] = False
     supports_array: ClassVar[bool] = False
+    stage_envelope: ClassVar[bool] = False
+
+    def parameters(self, fn: FunctionSpec) -> dict[str, dict]:
+        """Template parameters this step's resources reference, bound at deploy time."""
+        return {}
 
     def array_task_state(self, fn: FunctionSpec, size: str) -> TaskState:
         """The Task that runs ``size`` copies of the step as one array job (``size`` is JSONata).

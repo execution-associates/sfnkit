@@ -38,6 +38,9 @@ def deployed():
     app = build_app(ex.batchy, project_dir=ROOT)
     session = boto3.Session(region_name=REGION)
     cfn, batch = session.client("cloudformation"), session.client("batch")
+    logs = session.client("logs")
+    # Batch makes its default log group on first use in an account, even though no job logs to it.
+    had_batch_logs = bool(logs.describe_log_groups(logGroupNamePrefix="/aws/batch/job")["logGroups"])
     assets: dict = {}
     batch_ids: dict[str, list[str]] = {}
     try:
@@ -64,7 +67,11 @@ def deployed():
                 session.client("ecr").describe_repositories(
                     repositoryNames=[assets["RepositoryUri"].split("/", 1)[1]]
                 )
-        logs = session.client("logs")
+        if not had_batch_logs:
+            try:
+                logs.delete_log_group(logGroupName="/aws/batch/job")
+            except logs.exceptions.ResourceNotFoundException:
+                pass
         left = [
             g["logGroupName"]
             for page in logs.get_paginator("describe_log_groups").paginate(logGroupNamePrefix=stack)

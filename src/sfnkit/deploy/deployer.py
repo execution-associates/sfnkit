@@ -161,11 +161,14 @@ def deploy(
     region: str | None = None,
     session=None,
     builder=None,
+    queues: dict[str, str] | None = None,
     log: Callable = print,
 ) -> DeployResult:
+    """``queues`` binds named ``BatchQueue("gpu")`` queues to job queue ARNs."""
     from sfnkit.build.context import prepare_context
     from sfnkit.build.docker import DockerBuilder
 
+    queue_params = bind_queues(app, queues or {})
     session = _session(session, region)
     stack = stack_name or default_stack_name(app)
     validate_stack_name(stack, app)
@@ -183,7 +186,7 @@ def deploy(
 
     builder = builder or DockerBuilder(log=log)
     ecr = session.client("ecr")
-    params = {BUCKET_PARAM: bucket}
+    params = {BUCKET_PARAM: bucket, **queue_params}
     for image in app.images:
         context = prepare_context(app, image)
         params[image.param_name] = builder.ensure_image(context, repo_uri, ecr)
@@ -206,6 +209,27 @@ def deploy(
         log=log,
     )
     return DeployResult(stack, outputs["StateMachineArn"], bucket, session.region_name)
+
+
+def bind_queues(app: App, queues: dict[str, str]) -> dict[str, str]:
+    """Template parameters for named Batch queues; every name the workflow uses must be bound."""
+    from sfnkit.compute.batch import named_queues
+
+    named = named_queues(app.functions)
+    unknown = sorted(set(queues) - set(named))
+    if unknown:
+        raise DeployError(f"--queue {', '.join(unknown)}: no step runs on a queue by that name")
+    missing = sorted(set(named) - set(queues))
+    if missing:
+        flags = " ".join(f"--queue {n}=<job queue ARN>" for n in missing)
+        raise DeployError(
+            f"steps run on the named Batch queue(s) {', '.join(missing)}; bind them with {flags} "
+            "(or deploy through sfnkit.cdk.SfnkitWorkflow(queues=...))"
+        )
+    for name, arn in queues.items():
+        if not arn.startswith("arn:"):
+            raise DeployError(f"--queue {name}={arn}: expected a job queue ARN")
+    return {named[n].param_id: arn for n, arn in queues.items()}
 
 
 def empty_bucket(s3, bucket: str) -> None:

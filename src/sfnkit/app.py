@@ -35,10 +35,18 @@ class ImageVariant:
     python: str  # e.g. "3.14"
     architecture: str  # "x86_64" | "arm64"
     runtime: str = "lambda"  # "lambda" | "container": what the image starts (ComputeBackend.image_runtime)
+    base: str | None = None  # a custom base image (sfnkit.Image); None is the AWS Lambda Python base
+    conda: tuple[str, ...] = ()
+    channels: tuple[str, ...] = ()
+    python_mode: str | None = None  # Image.python: None (auto), "base" or a version
 
     @property
     def param_name(self) -> str:
         return f"Image{self.key}Uri"
+
+    @property
+    def custom(self) -> bool:
+        return self.base is not None
 
 
 @dataclass(eq=False)

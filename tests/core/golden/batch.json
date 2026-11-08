@@ -81,7 +81,7 @@
           "Next": "TooBig_m8"
          }
         ],
-        "Default": "square_m8",
+        "Default": "Stage_m8",
         "Type": "Choice"
        },
        "Empty_m8": {
@@ -91,6 +91,18 @@
         "Next": "BranchDone_p1b1",
         "Output": "{% {} %}",
         "Type": "Pass"
+       },
+       "PutInput_m8": {
+        "Arguments": {
+         "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.square\", \"execution\": $states.context.Execution.Name, \"node\": \"m8\", \"args\": {\"fail_at\": -1}, \"array\": {\"param\": \"item\", \"items\": $p1b1_m8_items, \"per\": 1}} %}",
+         "Bucket": "${ArtifactsBucket}",
+         "ContentType": "application/json",
+         "Key": "{% $p1b1_m8_in %}"
+        },
+        "Next": "square_m8",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+        "Type": "Task"
        },
        "PutItems_m8": {
         "Arguments": {
@@ -107,6 +119,14 @@
         "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
         "Type": "Task"
        },
+       "Stage_m8": {
+        "Assign": {
+         "p1b1_m8_in": "{% 'runs/' & $states.context.Execution.Name & '/m8/in/' & $uuid() & '.json' %}"
+        },
+        "Next": "PutInput_m8",
+        "Output": "{% {} %}",
+        "Type": "Pass"
+       },
        "TooBig_m8": {
         "Cause": "{% 'square.map() got ' & $string($p1b1_m8_items.n) & ' items; one array job takes at most 10000 (10,000 children x items_per_job=1)' %}",
         "Error": "sfnkit.ArrayTooLarge",
@@ -121,7 +141,7 @@
           "Environment": [
            {
             "Name": "SFNKIT_ENVELOPE",
-            "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.square\", \"execution\": $states.context.Execution.Name, \"node\": \"m8\", \"args\": {\"fail_at\": -1}, \"array\": {\"param\": \"item\", \"items\": $p1b1_m8_items, \"per\": 1}}) %}"
+            "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $p1b1_m8_in}) %}"
            },
            {
             "Name": "SFNKIT_TASK_TOKEN",
@@ -159,26 +179,79 @@
       "StartAt": "Attempt_a15",
       "States": {
        "Attempt_a15": {
-        "Arguments": {
-         "ContainerOverrides": {
-          "Environment": [
-           {
-            "Name": "SFNKIT_ENVELOPE",
-            "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.picky\", \"execution\": $states.context.Execution.Name, \"node\": \"n16\", \"args\": {\"x\": $input.x}}) %}"
-           },
-           {
-            "Name": "SFNKIT_TASK_TOKEN",
-            "Value": "{% $states.context.Task.Token %}"
-           }
-          ]
-         },
-         "JobDefinition": "${FnPickyccdf7fJobDef}",
-         "JobName": "{% $substring($replace($states.context.Execution.Name & '-FnPickyccdf7f', /[^A-Za-z0-9_-]/, '_'), 0, 128) %}",
-         "JobQueue": "${FnPickyccdf7fQueue}"
-        },
         "Assign": {
-         "p1b2_a15": "{% {\"ok\": true, \"v\": $states.result, \"error\": null, \"cause\": null} %}"
+         "p1b2_a15": "{% {\"ok\": true, \"v\": $states.result[0], \"error\": null, \"cause\": null} %}"
         },
+        "Branches": [
+         {
+          "StartAt": "Stage_n16",
+          "States": {
+           "AttemptDone_a15": {
+            "End": true,
+            "Output": "{% $p1b2_a15_n16 %}",
+            "Type": "Pass"
+           },
+           "PutInput_n16": {
+            "Arguments": {
+             "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.picky\", \"execution\": $states.context.Execution.Name, \"node\": \"n16\", \"args\": {\"x\": $input.x}} %}",
+             "Bucket": "${ArtifactsBucket}",
+             "ContentType": "application/json",
+             "Key": "{% $p1b2_a15_n16_in %}"
+            },
+            "Next": "picky_n16",
+            "Output": "{% {} %}",
+            "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+            "Type": "Task"
+           },
+           "Stage_n16": {
+            "Assign": {
+             "p1b2_a15_n16_in": "{% 'runs/' & $states.context.Execution.Name & '/n16/in/' & $uuid() & '.json' %}"
+            },
+            "Next": "PutInput_n16",
+            "Output": "{% {} %}",
+            "Type": "Pass"
+           },
+           "picky_n16": {
+            "Arguments": {
+             "ContainerOverrides": {
+              "Environment": [
+               {
+                "Name": "SFNKIT_ENVELOPE",
+                "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $p1b2_a15_n16_in}) %}"
+               },
+               {
+                "Name": "SFNKIT_TASK_TOKEN",
+                "Value": "{% $states.context.Task.Token %}"
+               }
+              ]
+             },
+             "JobDefinition": "${FnPickyccdf7fJobDef}",
+             "JobName": "{% $substring($replace($states.context.Execution.Name & '-FnPickyccdf7f', /[^A-Za-z0-9_-]/, '_'), 0, 128) %}",
+             "JobQueue": "${FnPickyccdf7fQueue}"
+            },
+            "Assign": {
+             "p1b2_a15_n16": "{% $states.result %}"
+            },
+            "Next": "AttemptDone_a15",
+            "Output": "{% {} %}",
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Retry": [
+             {
+              "BackoffRate": 2.0,
+              "ErrorEquals": [
+               "Batch.ServerException",
+               "Batch.TooManyRequestsException"
+              ],
+              "IntervalSeconds": 2,
+              "JitterStrategy": "FULL",
+              "MaxAttempts": 3
+             }
+            ],
+            "Type": "Task"
+           }
+          }
+         }
+        ],
         "Catch": [
          {
           "Assign": {
@@ -193,20 +266,7 @@
         ],
         "Next": "BranchDone_p1b2",
         "Output": "{% {} %}",
-        "Resource": "arn:aws:states:::batch:submitJob.sync",
-        "Retry": [
-         {
-          "BackoffRate": 2.0,
-          "ErrorEquals": [
-           "Batch.ServerException",
-           "Batch.TooManyRequestsException"
-          ],
-          "IntervalSeconds": 2,
-          "JitterStrategy": "FULL",
-          "MaxAttempts": 3
-         }
-        ],
-        "Type": "Task"
+        "Type": "Parallel"
        },
        "BranchDone_p1b2": {
         "End": true,
@@ -216,11 +276,11 @@
       }
      }
     ],
-    "Next": "Parallel_p2",
+    "Next": "Parallel_p3",
     "Output": "{% {} %}",
     "Type": "Parallel"
    },
-   "Parallel_p2": {
+   "Parallel_p3": {
     "Assign": {
      "m12": "{% $states.result[1].m12 %}",
      "m2": "{% $states.result[0].m2 %}",
@@ -230,9 +290,9 @@
      {
       "StartAt": "Check_m2",
       "States": {
-       "BranchDone_p2b0": {
+       "BranchDone_p3b0": {
         "End": true,
-        "Output": "{% {\"m2\": $p2b0_m2} %}",
+        "Output": "{% {\"m2\": $p3b0_m2} %}",
         "Type": "Pass"
        },
        "Check_m2": {
@@ -246,14 +306,34 @@
           "Next": "TooBig_m2"
          }
         ],
-        "Default": "square_m2",
+        "Default": "Stage_m2",
         "Type": "Choice"
        },
        "Empty_m2": {
         "Assign": {
-         "p2b0_m2": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m2/results/', \"n\": $n1.it.k_4ad4a146fc.n}} %}"
+         "p3b0_m2": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m2/results/', \"n\": $n1.it.k_4ad4a146fc.n}} %}"
         },
-        "Next": "BranchDone_p2b0",
+        "Next": "BranchDone_p3b0",
+        "Output": "{% {} %}",
+        "Type": "Pass"
+       },
+       "PutInput_m2": {
+        "Arguments": {
+         "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.square\", \"execution\": $states.context.Execution.Name, \"node\": \"m2\", \"args\": {\"fail_at\": $input.fail_at}, \"array\": {\"param\": \"item\", \"items\": $n1.it.k_4ad4a146fc, \"per\": 1}} %}",
+         "Bucket": "${ArtifactsBucket}",
+         "ContentType": "application/json",
+         "Key": "{% $p3b0_m2_in %}"
+        },
+        "Next": "square_m2",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+        "Type": "Task"
+       },
+       "Stage_m2": {
+        "Assign": {
+         "p3b0_m2_in": "{% 'runs/' & $states.context.Execution.Name & '/m2/in/' & $uuid() & '.json' %}"
+        },
+        "Next": "PutInput_m2",
         "Output": "{% {} %}",
         "Type": "Pass"
        },
@@ -271,7 +351,7 @@
           "Environment": [
            {
             "Name": "SFNKIT_ENVELOPE",
-            "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.square\", \"execution\": $states.context.Execution.Name, \"node\": \"m2\", \"args\": {\"fail_at\": $input.fail_at}, \"array\": {\"param\": \"item\", \"items\": $n1.it.k_4ad4a146fc, \"per\": 1}}) %}"
+            "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $p3b0_m2_in}) %}"
            },
            {
             "Name": "SFNKIT_TASK_TOKEN",
@@ -284,9 +364,9 @@
          "JobQueue": "${FnSquare27c1e0Queue}"
         },
         "Assign": {
-         "p2b0_m2": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m2/results/', \"n\": $n1.it.k_4ad4a146fc.n}} %}"
+         "p3b0_m2": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m2/results/', \"n\": $n1.it.k_4ad4a146fc.n}} %}"
         },
-        "Next": "BranchDone_p2b0",
+        "Next": "BranchDone_p3b0",
         "Output": "{% {} %}",
         "Resource": "arn:aws:states:::batch:submitJob.sync",
         "Retry": [
@@ -308,9 +388,9 @@
      {
       "StartAt": "Check_m12",
       "States": {
-       "BranchDone_p2b1": {
+       "BranchDone_p3b1": {
         "End": true,
-        "Output": "{% {\"m12\": $p2b1_m12} %}",
+        "Output": "{% {\"m12\": $p3b1_m12} %}",
         "Type": "Pass"
        },
        "Check_m12": {
@@ -324,14 +404,34 @@
           "Next": "TooBig_m12"
          }
         ],
-        "Default": "fragile_m12",
+        "Default": "Stage_m12",
         "Type": "Choice"
        },
        "Empty_m12": {
         "Assign": {
-         "p2b1_m12": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m12/results/', \"n\": $n1.it.k_4ad4a146fc.n, \"t\": true}} %}"
+         "p3b1_m12": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m12/results/', \"n\": $n1.it.k_4ad4a146fc.n, \"t\": true}} %}"
         },
-        "Next": "BranchDone_p2b1",
+        "Next": "BranchDone_p3b1",
+        "Output": "{% {} %}",
+        "Type": "Pass"
+       },
+       "PutInput_m12": {
+        "Arguments": {
+         "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.fragile\", \"execution\": $states.context.Execution.Name, \"node\": \"m12\", \"args\": {\"bad\": $input.bad}, \"array\": {\"param\": \"item\", \"items\": $n1.it.k_4ad4a146fc, \"per\": 1, \"tolerate\": 1}} %}",
+         "Bucket": "${ArtifactsBucket}",
+         "ContentType": "application/json",
+         "Key": "{% $p3b1_m12_in %}"
+        },
+        "Next": "fragile_m12",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+        "Type": "Task"
+       },
+       "Stage_m12": {
+        "Assign": {
+         "p3b1_m12_in": "{% 'runs/' & $states.context.Execution.Name & '/m12/in/' & $uuid() & '.json' %}"
+        },
+        "Next": "PutInput_m12",
         "Output": "{% {} %}",
         "Type": "Pass"
        },
@@ -349,7 +449,7 @@
           "Environment": [
            {
             "Name": "SFNKIT_ENVELOPE",
-            "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.fragile\", \"execution\": $states.context.Execution.Name, \"node\": \"m12\", \"args\": {\"bad\": $input.bad}, \"array\": {\"param\": \"item\", \"items\": $n1.it.k_4ad4a146fc, \"per\": 1, \"tolerate\": 1}}) %}"
+            "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $p3b1_m12_in}) %}"
            },
            {
             "Name": "SFNKIT_TASK_TOKEN",
@@ -362,9 +462,9 @@
          "JobQueue": "${FnFragile64d6e0Queue}"
         },
         "Assign": {
-         "p2b1_m12": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m12/results/', \"n\": $n1.it.k_4ad4a146fc.n, \"t\": true}} %}"
+         "p3b1_m12": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m12/results/', \"n\": $n1.it.k_4ad4a146fc.n, \"t\": true}} %}"
         },
-        "Next": "BranchDone_p2b1",
+        "Next": "BranchDone_p3b1",
         "Output": "{% {} %}",
         "Resource": "arn:aws:states:::batch:submitJob.sync",
         "Retry": [
@@ -386,9 +486,9 @@
      {
       "StartAt": "Choice_c17",
       "States": {
-       "BranchDone_p2b2": {
+       "BranchDone_p3b2": {
         "End": true,
-        "Output": "{% {\"phi20\": $p2b2_phi20} %}",
+        "Output": "{% {\"phi20\": $p3b2_phi20} %}",
         "Type": "Pass"
        },
        "Choice_c17": {
@@ -403,26 +503,26 @@
        },
        "Join_c17b0": {
         "Assign": {
-         "p2b2_phi20": "{% $a15.v %}"
+         "p3b2_phi20": "{% $a15.v %}"
         },
-        "Next": "BranchDone_p2b2",
+        "Next": "BranchDone_p3b2",
         "Type": "Pass"
        },
        "Join_c17b1": {
         "Assign": {
-         "p2b2_phi20": "{% \"value-error\" %}"
+         "p3b2_phi20": "{% \"value-error\" %}"
         },
-        "Next": "BranchDone_p2b2",
+        "Next": "BranchDone_p3b2",
         "Type": "Pass"
        }
       }
      }
     ],
-    "Next": "Parallel_p3",
+    "Next": "Parallel_p4",
     "Output": "{% {} %}",
     "Type": "Parallel"
    },
-   "Parallel_p3": {
+   "Parallel_p4": {
     "Assign": {
      "m5": "{% $states.result[0].m5 %}",
      "phi21": "{% $states.result[1].phi21 %}"
@@ -431,9 +531,9 @@
      {
       "StartAt": "Check_m5",
       "States": {
-       "BranchDone_p3b0": {
+       "BranchDone_p4b0": {
         "End": true,
-        "Output": "{% {\"m5\": $p3b0_m5} %}",
+        "Output": "{% {\"m5\": $p4b0_m5} %}",
         "Type": "Pass"
        },
        "Check_m5": {
@@ -447,14 +547,34 @@
           "Next": "TooBig_m5"
          }
         ],
-        "Default": "plus_one_m5",
+        "Default": "Stage_m5",
         "Type": "Choice"
        },
        "Empty_m5": {
         "Assign": {
-         "p3b0_m5": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m5/results/', \"n\": $m2.arr.n}} %}"
+         "p4b0_m5": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m5/results/', \"n\": $m2.arr.n}} %}"
         },
-        "Next": "BranchDone_p3b0",
+        "Next": "BranchDone_p4b0",
+        "Output": "{% {} %}",
+        "Type": "Pass"
+       },
+       "PutInput_m5": {
+        "Arguments": {
+         "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.plus_one\", \"execution\": $states.context.Execution.Name, \"node\": \"m5\", \"args\": {}, \"array\": {\"param\": \"r\", \"items\": $m2.arr, \"per\": 10}} %}",
+         "Bucket": "${ArtifactsBucket}",
+         "ContentType": "application/json",
+         "Key": "{% $p4b0_m5_in %}"
+        },
+        "Next": "plus_one_m5",
+        "Output": "{% {} %}",
+        "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+        "Type": "Task"
+       },
+       "Stage_m5": {
+        "Assign": {
+         "p4b0_m5_in": "{% 'runs/' & $states.context.Execution.Name & '/m5/in/' & $uuid() & '.json' %}"
+        },
+        "Next": "PutInput_m5",
         "Output": "{% {} %}",
         "Type": "Pass"
        },
@@ -472,7 +592,7 @@
           "Environment": [
            {
             "Name": "SFNKIT_ENVELOPE",
-            "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.plus_one\", \"execution\": $states.context.Execution.Name, \"node\": \"m5\", \"args\": {}, \"array\": {\"param\": \"r\", \"items\": $m2.arr, \"per\": 10}}) %}"
+            "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $p4b0_m5_in}) %}"
            },
            {
             "Name": "SFNKIT_TASK_TOKEN",
@@ -485,9 +605,9 @@
          "JobQueue": "${FnPlusOne9f62b5Queue}"
         },
         "Assign": {
-         "p3b0_m5": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m5/results/', \"n\": $m2.arr.n}} %}"
+         "p4b0_m5": "{% {\"$sw\": 1, \"arr\": {\"b\": '${ArtifactsBucket}', \"p\": 'runs/' & $states.context.Execution.Name & '/m5/results/', \"n\": $m2.arr.n}} %}"
         },
-        "Next": "BranchDone_p3b0",
+        "Next": "BranchDone_p4b0",
         "Output": "{% {} %}",
         "Resource": "arn:aws:states:::batch:submitJob.sync",
         "Retry": [
@@ -509,9 +629,9 @@
      {
       "StartAt": "Choice_c18",
       "States": {
-       "BranchDone_p3b1": {
+       "BranchDone_p4b1": {
         "End": true,
-        "Output": "{% {\"phi21\": $p3b1_phi21} %}",
+        "Output": "{% {\"phi21\": $p4b1_phi21} %}",
         "Type": "Pass"
        },
        "Choice_c18": {
@@ -526,24 +646,44 @@
        },
        "Join_c18b0": {
         "Assign": {
-         "p3b1_phi21": "{% \"big\" %}"
+         "p4b1_phi21": "{% \"big\" %}"
         },
-        "Next": "BranchDone_p3b1",
+        "Next": "BranchDone_p4b1",
         "Type": "Pass"
        },
        "Join_c18b1": {
         "Assign": {
-         "p3b1_phi21": "{% \"small\" %}"
+         "p4b1_phi21": "{% \"small\" %}"
         },
-        "Next": "BranchDone_p3b1",
+        "Next": "BranchDone_p4b1",
         "Type": "Pass"
        }
       }
      }
     ],
-    "Next": "total_n11",
+    "Next": "Stage_n11",
     "Output": "{% {} %}",
     "Type": "Parallel"
+   },
+   "PutInput_n11": {
+    "Arguments": {
+     "Body": "{% {\"sw\": 1, \"step\": \"examples.batch.total\", \"execution\": $states.context.Execution.Name, \"node\": \"n11\", \"args\": {\"values\": $m5}} %}",
+     "Bucket": "${ArtifactsBucket}",
+     "ContentType": "application/json",
+     "Key": "{% $n11_in %}"
+    },
+    "Next": "total_n11",
+    "Output": "{% {} %}",
+    "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+    "Type": "Task"
+   },
+   "Stage_n11": {
+    "Assign": {
+     "n11_in": "{% 'runs/' & $states.context.Execution.Name & '/n11/in/' & $uuid() & '.json' %}"
+    },
+    "Next": "PutInput_n11",
+    "Output": "{% {} %}",
+    "Type": "Pass"
    },
    "summarize_n19": {
     "Arguments": {
@@ -580,7 +720,7 @@
       "Environment": [
        {
         "Name": "SFNKIT_ENVELOPE",
-        "Value": "{% $string({\"sw\": 1, \"step\": \"examples.batch.total\", \"execution\": $states.context.Execution.Name, \"node\": \"n11\", \"args\": {\"values\": $m5}}) %}"
+        "Value": "{% $string({\"$sw\": 1, \"s3\": 's3://${ArtifactsBucket}/' & $n11_in}) %}"
        },
        {
         "Name": "SFNKIT_TASK_TOKEN",

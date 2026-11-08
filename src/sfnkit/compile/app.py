@@ -78,10 +78,13 @@ class _Builder:
             self.sub_names[id(s)] = self.unique(_sm_name(s.name))
         return self.sub_names[id(s)]
 
-    def image_for(self, deps: list[str], system: list[str], runtime: str = "lambda") -> ImageVariant:
+    def image_for(self, deps: list[str], system: list[str], runtime: str = "lambda", img=None) -> ImageVariant:
         parts: list = [deps, system, self.settings.python, self.settings.architecture]
         if runtime != "lambda":  # Lambda keys stay as they were before runtimes existed
             parts.append(runtime)
+        custom = img is not None and img.custom
+        if custom:  # likewise for images without a custom base
+            parts.append([img.base, list(img.conda), list(img.channels), img.python])
         key = _h(*parts)[:12]
         if key not in self.images:
             self.images[key] = ImageVariant(
@@ -91,6 +94,10 @@ class _Builder:
                 python=self.settings.python,
                 architecture=self.settings.architecture,
                 runtime=runtime,
+                base=img.base if custom else None,
+                conda=tuple(img.conda) if custom else (),
+                channels=tuple(img.channels) if custom and img.conda else (),
+                python_mode=img.python if custom else None,
             )
         return self.images[key]
 
@@ -98,11 +105,18 @@ class _Builder:
         owner = self.owner.get(id(t), self.root)
         step = t.step
         compute = step.compute or getattr(owner, "default_compute", None) or self.root.default_compute or Lambda()
-        deps = sorted(set(self.root.deps) | set(getattr(owner, "deps", ())) | set(step.deps))
-        system = sorted(
-            set(self.root.system_packages) | set(getattr(owner, "system_packages", ())) | set(step.system_packages)
+        # The step's image, else its own workflow's, else the root's; deps and packages always add up.
+        img = step.image or getattr(owner, "image", None) or self.root.image
+        deps = sorted(
+            set(self.root.deps) | set(getattr(owner, "deps", ())) | set(step.deps) | set(img.deps if img else ())
         )
-        image = self.image_for(deps, system, backend_for(compute).image_runtime)
+        system = sorted(
+            set(self.root.system_packages)
+            | set(getattr(owner, "system_packages", ()))
+            | set(step.system_packages)
+            | set(img.system_packages if img else ())
+        )
+        image = self.image_for(deps, system, backend_for(compute).image_runtime, img)
         key = (step.key, t.policy.digest(), repr(compute), image.key)
         fn = self.functions.get(key)
         if fn is None:

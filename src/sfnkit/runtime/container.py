@@ -1,7 +1,7 @@
 """Task-token transport for container backends (Batch now; ECS and EKS work the same way).
 
-The state machine starts the container with the envelope in ``SFNKIT_ENVELOPE`` and its task token in
-``SFNKIT_TASK_TOKEN``. Batch passes the token on a ``.sync`` submit; Step Functions takes the first
+The state machine writes the envelope to S3 and starts the container with an S3 wrapper pointing at it in
+``SFNKIT_ENVELOPE`` (an inline envelope works too) and its task token in ``SFNKIT_TASK_TOKEN``. Batch passes the token on a ``.sync`` submit; Step Functions takes the first
 SendTaskSuccess/SendTaskFailure as the task's outcome and stops watching the job.
 
 One job: run the step, then SendTaskSuccess with its result wrapper, or SendTaskFailure with the
@@ -31,7 +31,7 @@ import traceback
 from sfnkit.errors import ToleratedFailureExceeded
 from sfnkit.runtime import protocol as P
 from sfnkit.runtime.execute import execute
-from sfnkit.runtime.results import _put_json, _s3, array_items, exists, resolve
+from sfnkit.runtime.results import _get_json, _put_json, _s3, array_items, exists, parse_uri
 
 MAX_ERROR = 256
 MAX_CAUSE = 32768
@@ -136,8 +136,10 @@ def main(*, environ=None, sfn=None, s3=None, batch=None) -> int:
     envelope: dict = {}
     try:
         envelope = json.loads(environ[P.ENV_ENVELOPE])
-        if envelope.get("sw") is None:  # an S3 wrapper standing in for a large envelope
-            envelope = resolve(envelope, s3)
+        if envelope.get("sw") is None and P.S3 in envelope:
+            # The state machine staged the envelope in S3. Read it as it is: wrappers inside (an items
+            # locator, offloaded args) are resolved later, where they're used.
+            envelope = _get_json(*parse_uri(envelope[P.S3]), s3=s3)
         if envelope.get("array"):
             _run_array(envelope, environ, s3)
             return 0

@@ -264,6 +264,7 @@ def main_template(app: App) -> dict[str, Any]:
     resources: dict[str, Any] = {}
     for fn in app.functions:
         backend = backend_for(fn.compute)
+        params.update(backend.parameters(fn))
         resources[role_id(fn)] = _role(app, backend.assume_role_service, _function_statements(fn, ctx))
         resources.update(backend.resources(fn, ctx))
 
