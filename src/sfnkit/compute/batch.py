@@ -16,6 +16,9 @@ lost hosts) inside the job, up to ``retries`` attempts. A step's own exceptions,
 and the attempt timeout are never retried by Batch, since they would fail again. Exceptions go to Step
 Functions, where ``Retry(...)`` and ``attempt(...)`` see them by name.
 
+Inputs. The state machine writes each job's envelope to S3 under the run's prefix and passes only its
+location, since SubmitJob and Fargate cap the size of container overrides.
+
 Step Functions can only wait for Batch jobs in STANDARD workflows, so Batch steps can't run in an
 EXPRESS workflow or an EXPRESS Distributed Map child.
 """
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -85,10 +89,18 @@ class FargateQueue:
         return f"BatchQueue{self.key}"
 
 
+_QUEUE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+
+
 @dataclass(frozen=True)
 class BatchQueue:
-    """An existing job queue, made elsewhere (CDK, Terraform, the console). ``platform`` must match its
-    compute environments: job definitions differ between Fargate and EC2."""
+    """A job queue made outside sfnkit's stack (CDK, Terraform, the console).
+
+    ``arn`` is the queue's ARN, or a short name such as ``"gpu"`` that is bound at deploy time: by
+    ``sfnkit.cdk.SfnkitWorkflow(queues={"gpu": job_queue})``, or ``sfnkit deploy --queue gpu=<arn>``.
+    A name keeps account-specific ARNs out of the workflow code. ``platform`` must match the queue's
+    compute environments: job definitions differ between Fargate and EC2.
+    """
 
     arn: str
     platform: Literal["FARGATE", "EC2"] = "FARGATE"
@@ -97,6 +109,37 @@ class BatchQueue:
     def __post_init__(self):
         if self.platform not in ("FARGATE", "EC2"):
             raise ValueError("BatchQueue platform must be FARGATE or EC2")
+        if not self.arn.startswith("arn:") and not _QUEUE_NAME.match(self.arn):
+            raise ValueError(
+                f"BatchQueue takes a job queue ARN or a short name (letters, digits, - and _), not {self.arn!r}"
+            )
+
+    @property
+    def name(self) -> str | None:
+        """The deploy-time name, or None for a literal ARN."""
+        return None if self.arn.startswith("arn:") else self.arn
+
+    @property
+    def param_id(self) -> str:
+        """The template parameter that receives a named queue's ARN."""
+        return queue_param(self.arn)
+
+
+def queue_param(name: str) -> str:
+    camel = "".join(p[:1].upper() + p[1:] for p in re.split(r"[^A-Za-z0-9]+", name) if p)
+    return f"Queue{camel}{hashlib.sha256(name.encode()).hexdigest()[:6]}Arn"
+
+
+def named_queues(functions) -> dict[str, BatchQueue]:
+    """Every named BatchQueue the given FunctionSpecs run on, by name."""
+    out: dict[str, BatchQueue] = {}
+    for fn in functions:
+        q = getattr(fn.compute, "queue", None)
+        if isinstance(q, BatchQueue) and q.name:
+            prev = out.setdefault(q.name, q)
+            if prev.platform != q.platform:
+                raise ValueError(f"queue {q.name!r} is declared as both {prev.platform} and {q.platform}")
+    return out
 
 
 @dataclass(eq=False)
@@ -158,7 +201,9 @@ def _tag_map(ctx: SynthContext) -> dict[str, str]:
 
 def _queue_arn(spec: Batch) -> Any:
     q = spec.queue
-    return {"Ref": q.queue_id} if isinstance(q, FargateQueue) else q.arn
+    if isinstance(q, FargateQueue):
+        return {"Ref": q.queue_id}
+    return {"Ref": q.param_id} if q.name else q.arn
 
 
 class BatchBackend(ComputeBackend):
@@ -167,6 +212,15 @@ class BatchBackend(ComputeBackend):
     image_runtime = "container"
     standard_only = True
     supports_array = True
+    # SubmitJob takes at most 30 KiB, and Fargate passes overrides on to ECS, which takes 8 KiB. So the
+    # envelope goes to S3 and the job gets a pointer to it.
+    stage_envelope = True
+
+    def parameters(self, fn: FunctionSpec) -> dict[str, dict]:
+        q = fn.compute.queue  # type: ignore[attr-defined]
+        if isinstance(q, BatchQueue) and q.name:
+            return {q.param_id: {"Type": "String", "Description": f"ARN of the Batch job queue {q.name!r}"}}
+        return {}
 
     def resources(self, fn: FunctionSpec, ctx: SynthContext) -> dict[str, dict]:
         spec: Batch = fn.compute  # type: ignore[assignment]

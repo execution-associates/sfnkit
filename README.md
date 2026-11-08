@@ -1,15 +1,16 @@
 # sfnkit
 
 Write AWS Step Functions workflows as plain Python. Steps are decorated functions that run as Lambda
-container images. The workflow body is ordinary Python, including `match`, `if` and `with` blocks,
-and is compiled into a state machine.
+functions or AWS Batch jobs, from container images. The workflow body is ordinary Python, including
+`match`, `if` and `with` blocks, and is compiled into a state machine.
 
 ```
-pip install sfnkit
+pip install sfnkit            # sfnkit deploy
+pip install "sfnkit[cdk]"     # or as constructs in a CDK app
 ```
 
-Requires Python 3.12+. Deploying also needs Docker (to build the Lambda images) and AWS credentials
-that can create IAM roles.
+Requires Python 3.12+. Deploying also needs Docker (to build the images) and AWS credentials that can
+create IAM roles.
 
 Here is a complete workflow, `examples/checkout.py`. It loads an order from S3, prices each line,
 scores the order's risk, and charges the card:
@@ -230,6 +231,48 @@ contexts go in `<project>/.sfnkit/build/`.
 Everything else ships, so keep other secrets, like a key file, out of those folders or ignore them.
 The build stops with an error if the ignore rules would drop the workflow's own code.
 
+### Custom base images
+
+`Image(base=...)` runs a step on any Linux image with a shell instead of the Lambda base: a
+BioContainers tool, a CUDA image, GDAL, plain Debian. sfnkit adds Python if needed, the deps, its
+runtime and your code on top.
+
+```python
+from sfnkit import Batch, BatchQueue, Image, Lambda, step
+
+gpu = BatchQueue("gpu", platform="EC2")  # bound to a real queue at deploy time
+cuda = Image("nvidia/cuda:12.6.3-runtime-ubuntu24.04", deps=["torch"], system_packages=["git"])
+bio = Image("debian:bookworm-slim", conda=["samtools=1.21", "bcftools"])  # bioconda + conda-forge
+gdal = Image("ghcr.io/osgeo/gdal:ubuntu-small-3.10.0", deps=["rasterio"])
+
+@step(compute=Batch(queue=gpu, gpus=1, vcpus=8, memory=61440), image=cuda)
+def train(shard: str) -> str: ...
+
+@step(compute=Batch(queue=gpu, vcpus=4, memory=8192), image=bio)
+def call_variants(bam: str) -> str: ...
+
+@step(compute=Lambda(memory=2048), image=gdal)  # Lambda works too
+def reproject(tile: str) -> str: ...
+```
+
+- **Which Python.** By default, the base's own `python3` if it's 3.12 or newer, so packages already
+  in the image stay importable. Otherwise sfnkit installs a standalone Python of the workflow's
+  version with uv. `python="base"` insists on the base's (the build fails without one) and
+  `python="3.13"` always uses a standalone one.
+- **`conda=[...]`** creates a conda env with micromamba from `channels` (default `conda-forge`, then
+  `bioconda`), with Python in it. The env is activated for every run, so its tools are on `PATH`. Its
+  Python is the newest the solver can fit, up to the workflow's version, unless `python=` pins it.
+- **`system_packages`** are installed with whichever of `apt-get`, `apk`, `dnf`, `microdnf` or `yum`
+  the base has. **`deps`** are pip requirements, installed into that Python's own environment.
+- **Deps add up.** An image's `deps` and `system_packages` join the workflow's and the step's.
+  `@workflow(image=...)` sets the default image for its steps.
+- **Lambda on a custom base** gets `awslambdaric`, AWS's runtime interface client, so the base must
+  use glibc (not Alpine's musl).
+- **The build runs as root**, and so do Batch jobs on these images. Pin a digest
+  (`name@sha256:...`) for builds that never drift.
+
+`tests/test_images_docker.py` builds and runs each kind for real: `uv run pytest -m docker`.
+
 ## Deploying
 
 `deploy` creates two stacks:
@@ -240,6 +283,61 @@ The build stops with an error if the ignore rules would drop the workflow's own 
 `destroy` deletes both, emptying the bucket first. The deploying credentials must be allowed to
 create IAM roles. Credentials from `sts get-session-token` can't call IAM without MFA, so use
 long-term or assumed-role credentials.
+
+A named Batch queue (`BatchQueue("gpu")`) is bound at deploy time with `sfnkit deploy ... --queue
+gpu=arn:aws:batch:...`.
+
+## Deploying with CDK
+
+`sfnkit.cdk.SfnkitWorkflow` puts a workflow into a CDK stack, so `cdk deploy` ships it with the rest of
+your infrastructure:
+
+```python
+import aws_cdk as cdk
+from aws_cdk import aws_batch as batch, aws_ec2 as ec2, aws_iam as iam
+from sfnkit.cdk import SCHEDULED_TIME, Ec2Queue, SfnkitWorkflow
+
+# examples/cohort.py: its steps run on BatchQueue("fargate") and BatchQueue("scratch", platform="EC2")
+from examples.cohort import cohort, ticker
+
+class Pipeline(cdk.Stack):
+    def __init__(self, scope, id, **kw):
+        super().__init__(scope, id, **kw)
+        vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
+        fargate_env = batch.FargateComputeEnvironment(self, "FargateEnv", vpc=vpc, spot=True)
+        fargate = batch.JobQueue(self, "Fargate", compute_environments=[
+            batch.OrderedComputeEnvironment(compute_environment=fargate_env, order=1)])
+        scratch = Ec2Queue(self, "Scratch", vpc=vpc, scratch_gib=500)
+
+        wf = SfnkitWorkflow(self, "Cohort", workflow=cohort, queues={"fargate": fargate, "scratch": scratch})
+        analysts = iam.Role(self, "Analysts", assumed_by=iam.AccountRootPrincipal())
+        wf.state_machine.grant_start_execution(analysts)  # an ordinary sfn.IStateMachine
+
+        tick = SfnkitWorkflow(self, "Ticker", workflow=ticker)
+        tick.add_schedule("Daily", "cron(0 2 * * ? *)", input={"when": SCHEDULED_TIME}, timezone="UTC")
+
+app = cdk.App()
+Pipeline(app, "cohort", env=cdk.Environment(account="123456789012", region="us-west-2"))
+app.synth()
+```
+
+- **It's the same stack `sfnkit deploy` makes**, as native resources of yours: functions, job
+  definitions, roles, log groups, state machines and an artifacts bucket (pass `bucket=` to use
+  your own). Images are CDK Docker assets built from sfnkit's build contexts.
+- **Names** are `<stack>-<construct id>-<name>`, so several workflows can share a stack.
+- **Queues.** `queues=` binds each named `BatchQueue("...")` to a CDK job queue, an `Ec2Queue` or an
+  ARN. `Ec2Queue` is a shortcut for the EC2 case: Spot or on-demand, a gp3 scratch disk of
+  `scratch_gib` on every instance, and the GPU AMI with G5 instances for `gpu=True`.
+- **Triggers.** `state_machine` works wherever CDK takes a state machine: EventBridge rules, Pipes
+  from SQS, API Gateway. `add_schedule` uses EventBridge Scheduler and checks `input` against the
+  workflow's arguments. `SCHEDULED_TIME` is the time the run was scheduled for, not when it
+  started, so a late run or a backfill processes the right interval.
+- **The artifacts bucket outlives the stack**, as CDK buckets do by default. Pass
+  `removal_policy=cdk.RemovalPolicy.DESTROY, auto_delete_objects=True` to have it removed too.
+- **Images Lambda accepts.** Docker 29 adds provenance attestations by default, which Lambda rejects.
+  The assets are built with `attestation-inline=false` so they stay plain single-platform images.
+
+`examples/cohort_cdk.py` is a full app, and `tests/test_e2e_cdk.py` deploys it with `cdk deploy`.
 
 ## Running steps on AWS Batch
 
@@ -268,7 +366,8 @@ def cohort(samples: list):
 - **Queues.** `FargateQueue` creates a Fargate or Fargate Spot compute environment and job queue in
   the stack, and steps with equal queues share it. `BatchQueue(arn, platform=...)` uses a queue made
   elsewhere, such as CDK or Terraform. That's the way to get EC2 instances, GPUs or custom launch
-  templates.
+  templates. `BatchQueue("gpu", platform="EC2")`, with a name instead of an ARN, keeps account
+  details out of the code: the CDK construct or `sfnkit deploy --queue gpu=<arn>` binds it.
 - **`step.map(items)` on a Batch step is one array job**, not a Map state: one submit, up to 10,000
   children. Each child reads its item from S3 and writes its result back.
   - `Batch(items_per_job=k)` gives each child k items, for lists over 10,000 or very small items.
@@ -276,6 +375,9 @@ def cohort(samples: list):
   - Items can come from a step's output, another array job's results, a workflow input or a literal
     list.
   - `length(results)` works in conditions. Anything else about the results needs a step.
+- **Inputs of any size.** The state machine writes each job's input to the artifacts bucket and the
+  job gets its location, since a Batch submit takes at most 30 KiB and Fargate passes overrides on to
+  ECS, which takes 8 KiB.
 - **Results and errors work as with Lambda.** The job reports back through its task token, so
   `attempt`, `Retry(on=[...])` and `Err(...)` see the exception's class name. A failing array child
   fails the step with its error and terminates the rest of the array.
@@ -288,8 +390,8 @@ def cohort(samples: list):
 - **Per-sample pipelines.** Inside `with each(samples, distributed=True) as it:`, Batch steps run as
   one job each, so every sample moves on without waiting for the slowest one.
 - **Images.** Batch steps are built like Lambda steps, on the Lambda Python base image with the same
-  `deps` and `system_packages`, but start `python -m sfnkit.runtime.container`. Tools that need
-  another base image (BioContainers, CUDA) aren't supported yet.
+  `deps` and `system_packages`, but start `python -m sfnkit.runtime.container`. For tools that need
+  another base (BioContainers, CUDA, conda), see [Custom base images](#custom-base-images).
 
 `examples/batch.py` exercises all of this, and `tests/test_e2e_batch.py` runs it on Fargate Spot.
 
@@ -309,6 +411,10 @@ Every step runs through one interface, `sfnkit.compute.base.ComputeBackend`. To 
      with `SendTaskSuccess`/`SendTaskFailure`. Put `PAYLOAD_JSON` where the envelope goes as a string.
    - `standard_only = True` when Step Functions can only wait for the service in STANDARD workflows.
    - `supports_array = True` plus `array_task_state(fn, size)` makes `step.map` one native array job.
+   - `stage_envelope = True` has the state machine write the envelope to S3 first and pass an S3
+     wrapper in its place, for services with small request limits.
+   - `parameters(fn)` declares template parameters the resources need, bound at deploy time (Batch
+     uses it for named queues).
 4. Register it with `register_backend` or the `sfnkit.compute` entry point.
 
 The compiler, CloudFormation assembly and deployer only call this interface. `sfnkit.compute.batch`
@@ -322,6 +428,7 @@ Work happens in the isb sandbox described by `isb.yaml`:
 ```
 isb up -d
 scripts/sandbox.sh -- 'uv sync && uv run pytest'                    # unit tests, no AWS
+scripts/sandbox.sh -- 'uv run pytest -m docker'                       # build custom-base images for real
 scripts/sandbox.sh -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION \
   -- 'uv run pytest -m aws'                                            # validate ASL with AWS
 scripts/sandbox.sh -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION \
@@ -330,5 +437,10 @@ scripts/sandbox.sh -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_
 
 - **Golden ASL** lives in `tests/core/golden/`. Refresh it with `SFNKIT_UPDATE_GOLDEN=1` and
   review the diff.
-- **The e2e test** deploys `examples/pipeline.py` under a random `sfnkit-e2e-*` stack name, runs
-  every path, and always tears down.
+- **The e2e tests** deploy under random `sfnkit-e2e-*` stack names, run every path, and always tear
+  down. `test_e2e.py` deploys `examples/pipeline.py`; `test_e2e_batch.py` (`SFNKIT_SUBNETS`,
+  `SFNKIT_SECURITY_GROUPS`) runs `examples/batch.py` on Fargate Spot; `test_e2e_cdk.py` (plus
+  `SFNKIT_VPC`) deploys `examples/cohort_cdk.py` with the `cdk` CLI, using an asset bucket and
+  repository it creates and deletes itself.
+- **The Docker and CDK tests** need Docker and Node.js (for `aws-cdk-lib` and the `cdk` CLI) in
+  the sandbox.

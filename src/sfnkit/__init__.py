@@ -26,6 +26,7 @@ from sfnkit.compute import (
 )
 from sfnkit.errors import CompileError, DeployError, LintError, SfnkitError, TraceError
 from sfnkit.iam import Allow, Deny, Policy
+from sfnkit.image import Image
 from sfnkit.local import WorkflowFailed
 from sfnkit.step import Retry, Step, step
 from sfnkit.workflow import Workflow, workflow
@@ -43,6 +44,7 @@ __all__ = [
     "DeployError",
     "Err",
     "FargateQueue",
+    "Image",
     "Lambda",
     "LintError",
     "Ok",

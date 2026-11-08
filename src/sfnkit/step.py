@@ -13,6 +13,7 @@ from sfnkit.compute.base import ComputeSpec
 from sfnkit.errors import TraceError
 from sfnkit.expr import Expr, lift
 from sfnkit.iam import Policy, Statement
+from sfnkit.image import Image
 
 _REGISTRY: dict[str, Step] = {}
 
@@ -76,17 +77,21 @@ class Step:
         compute: ComputeSpec | None = None,
         deps: Sequence[str] = (),
         system_packages: Sequence[str] = (),
+        image: Image | None = None,
         iam: Policy | Statement | None = None,
         retry: Retry | Sequence[Retry] | None = None,
         env: dict[str, str] | None = None,
     ):
         _check_importable(fn, "@step")
+        if image is not None and not isinstance(image, Image):
+            raise TypeError("image= takes an sfnkit.Image(...)")
         self.fn = fn
         self.key = f"{fn.__module__}.{fn.__qualname__}"
         self.name = name or fn.__name__
         self.compute = compute
         self.deps = tuple(deps)
         self.system_packages = tuple(system_packages)
+        self.image = image
         self.iam = _as_policy(iam)
         self.retry = [retry] if isinstance(retry, Retry) else list(retry or [])
         self.env = dict(env or {})
@@ -162,7 +167,7 @@ def step(fn: Callable | None = None, **options):
     """Mark a function as a workflow step.
 
     Usable bare (``@step``) or with options: ``compute=Lambda(...)``, ``deps=[...]``,
-    ``system_packages=[...]``, ``iam=Policy(...)``, ``retry=Retry(...)``, ``env={...}``, ``name=...``.
+    ``system_packages=[...]``, ``image=Image(...)``, ``iam=Policy(...)``, ``retry=Retry(...)``, ``env={...}``, ``name=...``.
     """
     if fn is not None:
         return Step(fn, **options)

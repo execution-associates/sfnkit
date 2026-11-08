@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Execution Associates" }]
-keywords = ["aws", "step-functions", "lambda", "workflow", "orchestration", "serverless"]
+keywords = ["aws", "step-functions", "lambda", "batch", "cdk", "workflow", "orchestration", "serverless"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,6 +21,10 @@ classifiers = [
 ]
 dependencies = ["boto3>=1.35", "pathspec>=0.12"]
 
+[project.optional-dependencies]
+# sfnkit.cdk: the workflow as CDK constructs, for apps deployed with `cdk deploy`.
+cdk = ["aws-cdk-lib>=2.180", "constructs>=10"]
+
 [project.urls]
 Homepage = "https://github.com/execution-associates/sfnkit"
 Repository = "https://github.com/execution-associates/sfnkit"
@@ -33,7 +37,7 @@ sfnkit = "sfnkit.cli:main"
 lambda = "sfnkit.compute.lambda_:LambdaBackend"
 
 [dependency-groups]
-dev = ["pytest>=8", "moto[s3]>=5", "cfn-lint>=1", "ruff>=0.6"]
+dev = ["pytest>=8", "moto[s3]>=5", "cfn-lint>=1", "ruff>=0.6", "aws-cdk-lib>=2.180", "constructs>=10"]
 
 [build-system]
 requires = ["hatchling"]
@@ -46,8 +50,9 @@ packages = ["src/sfnkit"]
 markers = [
     "aws: calls real AWS APIs but creates no resources",
     "e2e: deploys real resources to AWS and tears them down",
+    "docker: builds real images with Docker (slow, needs the network)",
 ]
-addopts = "-m 'not aws and not e2e'"
+addopts = "-m 'not aws and not e2e and not docker'"
 testpaths = ["tests"]
 
 [tool.ruff]

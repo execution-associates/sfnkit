@@ -675,13 +675,43 @@ class Compiler:
                 "STANDARD workflows; it can't run in an EXPRESS workflow or an EXPRESS Distributed Map child"
             )
 
-    def task_state(self, st: TaskN, ctx: Ctx) -> tuple[dict, str]:
+    def task_state(self, st: TaskN, ctx: Ctx, payload: J | None = None) -> tuple[dict, str]:
         fn = self.function_for(st)
         self.check_express(st, fn)
         backend = backend_for(fn.compute)
         ts = backend.task_state(fn)
-        state = self.task_from(ts, st, fn, self.envelope(st, ctx))
+        state = self.task_from(ts, st, fn, payload or self.envelope(st, ctx))
         return state, ts.result
+
+    def staged(self, st: TaskN) -> bool:
+        return backend_for(self.function_for(st).compute).stage_envelope
+
+    def stage(self, node_id: str, ctx: Ctx, payload: J) -> tuple[Frag, J]:
+        """Write an envelope to the artifacts bucket; return the states and the S3 wrapper standing in
+        for it. The key is drawn once, in a Pass, so the upload and the wrapper agree on it."""
+        self.machine.substitutions["ArtifactsBucket"] = {"Ref": "ArtifactsBucket"}
+        kvar = ctx.var(node_id + "_in")
+        key = f"'runs/' & $states.context.Execution.Name & '/{node_id}/in/' & $uuid() & '.json'"
+        pick = {"Type": "Pass", "Assign": {kvar: J(key)}, "Output": J("{}")}
+        put = {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:s3:putObject",
+            "Arguments": {
+                "Bucket": "${ArtifactsBucket}",
+                "Key": J(f"${kvar}"),
+                "Body": payload,  # a JSON value: Step Functions writes it as JSON text
+                "ContentType": "application/json",
+            },
+            "Output": J("{}"),
+        }
+        frag = seq(
+            [
+                Frag.single(self.state_name("Stage", node_id), pick),
+                Frag.single(self.state_name("PutInput", node_id), put),
+            ]
+        )
+        assert frag is not None
+        return frag, J(f"{{\"$sw\": 1, \"s3\": 's3://${{ArtifactsBucket}}/' & ${kvar}}}")
 
     def task_from(self, ts, st: TaskN, fn, payload: J) -> dict:
         """A Task state from a backend's ``TaskState``, with the envelope filled in."""
@@ -699,12 +729,15 @@ class Compiler:
         return state
 
     def task(self, st: TaskN, ctx: Ctx) -> Frag:
-        state, result = self.task_state(st, ctx)
+        pre, payload = self.stage(st.id, ctx, self.envelope(st, ctx)) if self.staged(st) else (None, None)
+        state, result = self.task_state(st, ctx, payload)
         var = ctx.var(st.id)
         state["Assign"] = {var: J(result)}
         state["Output"] = J("{}")
         ctx.syms[id(st)] = Loc(f"${var}", "wrapper", self.treg(st), st)
-        return Frag.single(self.state_name(st.step.name, st.id), state)
+        out = seq([pre, Frag.single(self.state_name(st.step.name, st.id), state)])
+        assert out is not None
+        return out
 
     def items_source(self, m: MapN, ctx: Ctx) -> tuple[dict, Loc]:
         from sfnkit.blocks import S3File, S3Objects
@@ -925,7 +958,11 @@ class Compiler:
             )
 
         ts = backend.array_task_state(fn, f"$max([2, $ceil({n} / {per})])")
-        submit = self.task_from(ts, t, fn, J(render))
+        payload = J(render)
+        pre = None
+        if backend.stage_envelope:
+            pre, payload = self.stage(m.id, ctx, payload)
+        submit = self.task_from(ts, t, fn, payload)
         submit["Assign"] = {var: result}
         submit["Output"] = J("{}")
         submit_name = self.state_name(t.step.name, m.id)
@@ -936,9 +973,13 @@ class Compiler:
                 {"Condition": J(f"{n} = 0"), "Next": empty_name},
                 {"Condition": J(f"{n} > {limit}"), "Next": big_name},
             ],
-            "Default": submit_name,
+            "Default": pre.entry if pre else submit_name,
         }
         states = {check_name: check, empty_name: empty, big_name: big, submit_name: submit}
+        if pre:
+            for ex in pre.exits:
+                ex(submit_name)
+            states.update(pre.states)
         frags.append(
             Frag(
                 states,
@@ -1033,6 +1074,7 @@ class Compiler:
             and isinstance(body.result, Get)
             and body.result.src is body.stmts[0]
             and not body.result.path
+            and not self.staged(body.stmts[0])  # a staged step is three states: it needs a branch
         )
         if single:
             t: TaskN = body.stmts[0]  # type: ignore[assignment]

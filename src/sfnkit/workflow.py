@@ -13,6 +13,7 @@ from sfnkit.compute.base import ComputeSpec
 from sfnkit.errors import TraceError
 from sfnkit.expr import Expr, lift
 from sfnkit.iam import Policy, Statement
+from sfnkit.image import Image
 from sfnkit.step import _as_policy, _check_importable
 from sfnkit.trace.lint import lint
 
@@ -26,6 +27,7 @@ class Workflow:
         iam: Policy | Statement | None = None,
         deps: Sequence[str] = (),
         system_packages: Sequence[str] = (),
+        image: Image | None = None,
         default_compute: ComputeSpec | None = None,
         type: str = "STANDARD",
         python: str = "3.14",
@@ -39,6 +41,8 @@ class Workflow:
             raise ValueError("type must be STANDARD or EXPRESS")
         if architecture not in ("x86_64", "arm64"):
             raise ValueError("architecture must be x86_64 or arm64")
+        if image is not None and not isinstance(image, Image):
+            raise TypeError("image= takes an sfnkit.Image(...)")
         self.fn = fn
         self.name = name or fn.__name__
         self.module = fn.__module__
@@ -46,6 +50,7 @@ class Workflow:
         self.iam = _as_policy(iam)
         self.deps = tuple(deps)
         self.system_packages = tuple(system_packages)
+        self.image = image
         self.default_compute = default_compute
         self.type = type
         self.python = python
@@ -138,8 +143,8 @@ class Workflow:
 
 
 def workflow(fn: Callable | None = None, **options):
-    """Mark a function as a workflow. Options: ``iam=``, ``deps=``, ``system_packages=``,
-    ``default_compute=``, ``type="STANDARD"|"EXPRESS"``, ``python=``, ``architecture=``, ``max_paths=``,
+    """Mark a function as a workflow. Options: ``iam=``, ``deps=``, ``system_packages=``, ``image=`` (the
+    default image for its steps), ``default_compute=``, ``type="STANDARD"|"EXPRESS"``, ``python=``, ``architecture=``, ``max_paths=``,
     ``exclude=``, ``offload_threshold=``, ``name=``."""
     if fn is not None:
         return Workflow(fn, **options)

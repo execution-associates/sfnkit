@@ -48,3 +48,15 @@ def test_envelope_from_s3(s3):
     }
     assert main(environ=environ, sfn=sfn, s3=s3) == 0
     assert json.loads(sfn.calls[0][1]["output"]) == {"$sw": 1, "v": 6}
+
+
+def test_staged_envelope_keeps_offloaded_args_for_execute(s3):
+    s3.put_object(Bucket="art", Key="runs/e/n/big.json", Body=json.dumps(40))
+    envelope = {"sw": 1, "step": "infra_dummy_steps.add", "execution": "e", "node": "n",
+                "args": {"a": {"$sw": 1, "s3": "s3://art/runs/e/n/big.json"}, "b": 2}}
+    s3.put_object(Bucket="art", Key="runs/e/n/in/x.json", Body=json.dumps(envelope))
+    sfn = FakeSfn()
+    environ = {"SFNKIT_ENVELOPE": json.dumps({"$sw": 1, "s3": "s3://art/runs/e/n/in/x.json"}),
+               "SFNKIT_TASK_TOKEN": "t"}
+    assert main(environ=environ, sfn=sfn, s3=s3) == 0
+    assert json.loads(sfn.calls[0][1]["output"]) == {"$sw": 1, "v": 42}
